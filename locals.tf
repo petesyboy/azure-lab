@@ -508,4 +508,27 @@ locals {
       - ${cmd}
 %{ endfor ~}
   EOF
+
+  # Cribl VM: For receiving and processing Gigamon AMI records
+  cribl_vm_cloud_init = <<-EOF
+    #cloud-config
+    package_upgrade: true
+    packages:
+      - curl
+      - jq
+      - ufw
+
+    ssh_authorized_keys:
+      - ${tls_private_key.lab_key.public_key_openssh}
+
+    runcmd:
+      - echo "Installing Cribl Stream..."
+      - curl -Lso /tmp/cribl.sh https://cdn.cribl.io/dl/latest-x64 && sh /tmp/cribl.sh -g -c /opt/cribl -y
+      - /opt/cribl/bin/cribl start
+      # Add firewall exceptions (no-op if ufw is not active)
+      - ufw allow ssh || true
+      - ufw allow 9000/tcp || true # Cribl UI
+      - ufw allow 4739/udp || true # IPFIX for Gigamon AMI
+      - if [ -f /var/run/reboot-required ]; then reboot; fi
+  EOF
 }

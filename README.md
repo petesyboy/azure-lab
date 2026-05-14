@@ -78,7 +78,6 @@ This lab demonstrates a **MULTI-LAYER ORCHESTRATION** approach:
 
 **Layer 2 (Application/Control Plane)**: GigaVUE-FM + Gigamon V Series
 - Third-party orchestration platform independent of Azure Resource Manager
-- Manages traffic visibility, tap points, and packet processing
 - Manages traffic visibility, tap points, packet processing, and **Application Metadata Intelligence (AMI) generation**.
 - Communicates via proprietary Gigamon protocols and REST APIs
 - NOT using Azure Service Fabric, Kubernetes, or ARM templates for control plane
@@ -102,9 +101,12 @@ After successful deployment, the following outputs are available:
 - `uctv_public_ip` - UCT-V Controller management/troubleshooting
 - `tool_vm_public_ip` - Tool VM access (SSH, ntopng UI on port 3000)
 - `cribl_vm_public_ip` - Cribl VM access (SSH, Cribl UI on port 9000)
+- `cribl_vm_private_ip` - Private IP for the Cribl VM, used as an AMI export destination.
 - `vseries_public_ip` - vSeries Node management/troubleshooting
 - `prod1_public_ip` - Production Ubuntu VM 1 SSH access
+- `prod1_private_ip` - Production Ubuntu VM 1 private IP address.
 - `prod2_public_ip` - Production Ubuntu VM 2 SSH access
+- `prod2_private_ip` - Production Ubuntu VM 2 private IP address.
 - `key_vault_name` - Name of the Azure Key Vault created for the lab
 - `fm_token_secret_name` - Name of the secret to store the FM API token
 
@@ -302,7 +304,6 @@ The output includes:
 - **IPs and URLs**: `fm_public_ip`, `tool_vm_public_ip`, `prod1_public_ip`, `prod2_public_ip`, etc.
 - **SSH Key Security**: Ensure your private key has the correct permissions (Linux/macOS):
   ```bash
-  chmod 400 $(terraform output -raw lab_key_pem_filename)
   chmod 400 $(terraform output -raw lab_key_file)
   ```
 - **SSH Commands** (ready to copy-paste): `ssh_fm`, `ssh_uctv`, `ssh_vseries`, `ssh_tool_vm`, `ssh_prod1`, `ssh_prod2`
@@ -383,10 +384,10 @@ iperf3 -s
 $(terraform output -raw ssh_prod1)
 
 # Once connected, get prod2's private IP from terraform output
-terraform output prod2_private_ip
+PROD2_IP=$(terraform output -raw prod2_private_ip)
 
 # Then run iperf3 client (replace 10.0.2.x with actual private IP)
-iperf3 -c 10.0.2.x -t 300
+iperf3 -c $PROD2_IP -t 300
 ```
 
 ### 4. Verifying Visibility (ntopng)

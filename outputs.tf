@@ -63,14 +63,34 @@ output "tool_vm_public_ip" {
   description = "The public IP address of the Tool VM"
 }
 
+output "cribl_vm_public_ip" {
+  value       = module.cribl_vm.public_ip
+  description = "The public IP address of the Cribl VM"
+}
+
+output "cribl_vm_private_ip" {
+  value       = module.cribl_vm.private_ip
+  description = "The private IP address of the Cribl VM"
+}
+
 output "prod1_public_ip" {
   value       = module.prod1.public_ip
   description = "The public IP address of Production VM 1"
 }
 
+output "prod1_private_ip" {
+  value       = module.prod1.private_ip
+  description = "The private IP address of Production VM 1"
+}
+
 output "prod2_public_ip" {
   value       = module.prod2.public_ip
   description = "The public IP address of Production VM 2"
+}
+
+output "prod2_private_ip" {
+  value       = module.prod2.private_ip
+  description = "The private IP address of Production VM 2"
 }
 
 output "ssh_fm" {
@@ -93,6 +113,11 @@ output "ssh_tool_vm" {
   description = "SSH command for Tool VM"
 }
 
+output "ssh_cribl_vm" {
+  value       = "ssh -i ./lab_key.pem ${var.admin_username}@${module.cribl_vm.public_ip}"
+  description = "SSH command for Cribl VM"
+}
+
 output "ssh_prod1" {
   value       = "ssh -i ./lab_key.pem ${var.admin_username}@${module.prod1.public_ip}"
   description = "SSH command for Production VM 1"
@@ -106,4 +131,9 @@ output "ssh_prod2" {
 output "ntopng_ui_url" {
   value       = "http://${module.tool_vm.public_ip}:3000"
   description = "Clickable URL for the ntopng Web UI on the Tool VM"
+}
+
+output "cribl_ui_url" {
+  value       = "http://${module.cribl_vm.public_ip}:9000"
+  description = "Clickable URL for the Cribl Stream Web UI on the Cribl VM"
 }
