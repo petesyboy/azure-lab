@@ -361,6 +361,32 @@ module "prod2" {
   project_tag         = var.project_name
 }
 
+# -----------------------------------------------------------------------------
+# Cribl VM (AMI Destination)
+# -----------------------------------------------------------------------------
+module "cribl_vm" {
+  source = "./modules/linux-vm"
+
+  vm_name             = "connolly-cribl-vm"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  subnet_id           = module.networking.visibility_subnet_id # Deployed in Visibility Subnet
+  vm_size             = var.ubuntu_vm_size                     # Can be adjusted if needed
+  admin_username      = var.admin_username
+  ssh_public_key      = tls_private_key.lab_key.public_key_openssh
+  image_publisher     = local.ubuntu_publisher
+  image_offer         = local.ubuntu_offer
+  image_sku           = local.ubuntu_sku
+  image_version       = local.ubuntu_version
+  custom_data         = base64encode(local.cribl_vm_cloud_init)
+  os_disk_name        = "osdisk-cribl"
+  pip_name            = "pip-cribl"
+  nic_name            = "nic-cribl"
+  ip_config_name      = "ipconfig-cribl"
+  role_tag            = "cribl-vm"
+  owner_email         = var.gigamon_email
+  project_tag         = var.project_name
+}
 
 # -----------------------------------------------------------------------------
 # Orchestration

@@ -50,6 +50,12 @@ The deployment creates a complete network topology with the following design pri
 - Configured with VXLAN interface (vxlan0, VNI=123, dstport=4789) to receive mirrored traffic
 - Systemd service ensures VXLAN persistence across reboots
 
+**Cribl VM (cribl-vm)**
+- Deployed in the Visibility Subnet.
+- Runs Cribl Stream to receive, process, and route observability data.
+- Configured to listen for Gigamon Application Metadata Intelligence (AMI) records via IPFIX (UDP/4739).
+- Provides a destination for enriched metadata from the vSeries Node.
+
 **Production Ubuntu VM 1 (prod-ubuntu-1)**
 - Complex workload with traffic analytics
 - Includes: iperf3 (traffic generation)
@@ -73,6 +79,7 @@ This lab demonstrates a **MULTI-LAYER ORCHESTRATION** approach:
 **Layer 2 (Application/Control Plane)**: GigaVUE-FM + Gigamon V Series
 - Third-party orchestration platform independent of Azure Resource Manager
 - Manages traffic visibility, tap points, and packet processing
+- Manages traffic visibility, tap points, packet processing, and **Application Metadata Intelligence (AMI) generation**.
 - Communicates via proprietary Gigamon protocols and REST APIs
 - NOT using Azure Service Fabric, Kubernetes, or ARM templates for control plane
 - Illustrates how third-party platforms maintain their own orchestration layer on top of Azure infrastructure
@@ -94,6 +101,7 @@ After successful deployment, the following outputs are available:
 - `fm_public_ip` - Access the GigaVUE-FM web interface (https://<IP>)
 - `uctv_public_ip` - UCT-V Controller management/troubleshooting
 - `tool_vm_public_ip` - Tool VM access (SSH, ntopng UI on port 3000)
+- `cribl_vm_public_ip` - Cribl VM access (SSH, Cribl UI on port 9000)
 - `vseries_public_ip` - vSeries Node management/troubleshooting
 - `prod1_public_ip` - Production Ubuntu VM 1 SSH access
 - `prod2_public_ip` - Production Ubuntu VM 2 SSH access
@@ -127,6 +135,7 @@ This lab environment supports:
 4. **Performance Benchmarking**: iperf3 generates various load profiles
 5. **VXLAN Overlay Testing**: Test encapsulated traffic over the vSeries
 6. **Cloud-Native Design**: Full IaC approach with modular, reusable components
+7. **Metadata Enrichment**: Export Gigamon AMI records to Cribl for security and operational analytics.
 
 ## Repository Contents
 
@@ -294,6 +303,7 @@ The output includes:
 - **SSH Key Security**: Ensure your private key has the correct permissions (Linux/macOS):
   ```bash
   chmod 400 $(terraform output -raw lab_key_pem_filename)
+  chmod 400 $(terraform output -raw lab_key_file)
   ```
 - **SSH Commands** (ready to copy-paste): `ssh_fm`, `ssh_uctv`, `ssh_vseries`, `ssh_tool_vm`, `ssh_prod1`, `ssh_prod2`
 - **Key File Path**: `lab_key_pem_filename`

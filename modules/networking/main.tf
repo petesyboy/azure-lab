@@ -198,6 +198,32 @@ resource "azurerm_network_security_group" "nsg_visibility" {
     destination_address_prefix = "*"
   }
 
+  # Cribl web interface (TCP 9000)
+  security_rule {
+    name                       = "Allow-Cribl-UI-9000"
+    priority                   = 181
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "9000"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  # Gigamon AMI via IPFIX to Cribl (UDP 4739)
+  security_rule {
+    name                       = "Allow-IPFIX-4739"
+    priority                   = 182
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Udp"
+    source_port_range          = "*"
+    destination_port_range     = "4739"
+    source_address_prefix      = "VirtualNetwork" # Only from within the VNet
+    destination_address_prefix = "*"
+  }
+
   # UCT-V agent control/management (TCP 9902) - allows traffic from prod subnet to visibility
   security_rule {
     name                       = "Allow-UCTV-Agent-9902"
