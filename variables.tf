@@ -65,6 +65,11 @@ variable "ubuntu_version" {
   type        = string
   description = "Ubuntu release to use for VM images. Allowed: \"22.04\" or \"24.04\"."
   default     = "22.04"
+
+  validation {
+    condition     = contains(["22.04", "24.04"], var.ubuntu_version)
+    error_message = "The ubuntu_version must be either '22.04' or '24.04'."
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -102,6 +107,11 @@ variable "gigamon_version" {
   type        = string
   description = "The major.minor version of the Gigamon Cloud Suite to deploy (e.g., '6.12', '6.13')."
   default     = "6.13"
+
+  validation {
+    condition     = can(regex("^6\\.\\d{2}$", var.gigamon_version))
+    error_message = "The gigamon_version must be in the format '6.xx' (e.g., '6.12', '6.13')."
+  }
 }
 
 variable "gigamon_image_publisher" {
