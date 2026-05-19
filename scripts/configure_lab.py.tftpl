@@ -88,15 +88,12 @@ def check_fm_accessible():
 def get_auth_token():
     """
     Retrieves the FM API token directly from Azure Key Vault using the Azure CLI.
-    This avoids attempting to login to FM programmatically.
+    If it is not found, prompts the user to enter it and uploads it.
     """
-    print(f"Retrieving FM API Token from Azure Key Vault '{KEY_VAULT_NAME}' (Secret: '{FM_TOKEN_SECRET_NAME}')...")
+    print(f"Checking Azure Key Vault '{KEY_VAULT_NAME}' for secret '{FM_TOKEN_SECRET_NAME}'...")
+    az_cmd = shutil.which("az") or ("az.cmd" if os.name == 'nt' else "az")
 
     try:
-        # Fix for Windows: Resolve 'az' to 'az.cmd' or full path
-        az_cmd = shutil.which("az") or ("az.cmd" if os.name == 'nt' else "az")
-
-        # Construct the Azure CLI command to get the secret
         cmd = [
             az_cmd, "keyvault", "secret", "show",
             "--vault-name", KEY_VAULT_NAME,
@@ -104,16 +101,43 @@ def get_auth_token():
             "--query", "value",
             "-o", "tsv"
         ]
-
-        # Execute the command
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         token = result.stdout.strip()
+        if token:
+            print("Successfully retrieved token from Key Vault.")
+            return token
+    except subprocess.CalledProcessError:
+        # Secret likely doesn't exist yet, proceed to prompt
+        pass
 
-        if not token:
-            print("Error: Retrieved token is empty.")
-            sys.exit(1)
+    print("\n" + "!"*60)
+    print("FM API Token not found in Azure Key Vault.")
+    print(f"Please log in to GigaVUE-FM at {FM_URL}")
+    print("1. Change the default password (admin / admin123A!!)")
+    print("2. Go to Administration -> User Management -> Tokens")
+    print("3. Generate a new token (e.g., 105 days, Super Admin Group)")
+    print("!"*60 + "\n")
+    
+    token = input("Paste your FM API Token here: ").strip()
+    if not token:
+        print("Error: Token cannot be empty.")
+        sys.exit(1)
 
-        print("Successfully retrieved token from Key Vault.")
+    print(f"\nUploading token to Key Vault '{KEY_VAULT_NAME}'...")
+    try:
+        upload_cmd = [
+            az_cmd, "keyvault", "secret", "set",
+            "--vault-name", KEY_VAULT_NAME,
+            "--name", FM_TOKEN_SECRET_NAME,
+            "--value", token
+        ]
+        subprocess.run(upload_cmd, capture_output=True, text=True, check=True)
+        print("Successfully uploaded token to Key Vault.")
+        
+        # Allow a few seconds for the secret and RBAC propagation before the VMs try to pull it
+        print("Waiting 10 seconds for Key Vault changes to propagate...")
+        time.sleep(10)
+        
         return token
 
     except subprocess.CalledProcessError as e:

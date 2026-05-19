@@ -10,10 +10,20 @@ def run_command(command, cwd=None):
         print(f"[!] Error executing {' '.join(command)}")
         sys.exit(result.returncode)
 
+def check_dependencies():
+    try:
+        import requests
+    except ImportError:
+        print("[*] Required module 'requests' not found. Installing...")
+        run_command([sys.executable, "-m", "pip", "install", "requests"])
+
 def main():
     print("======================================================")
     print(" Azure Lab 6.12 - Gigamon V Series Deployment Wrapper ")
     print("======================================================")
+    
+    # 0. Check dependencies
+    check_dependencies()
     
     # 1. Initialize Terraform
     run_command(["terraform", "init"])
