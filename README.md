@@ -2,6 +2,21 @@
 
 This repository contains Terraform Infrastructure-as-Code (IaC) and Python automation scripts to deploy a complete Gigamon V Series cloud-based traffic visibility and optimization lab environment in Microsoft Azure. The lab demonstrates third-party orchestration and management capabilities using Gigamon's GigaVUE-FM platform, rather than relying on native Azure deployment APIs. This illustrates how organizations can run independent orchestration and control planes in Azure while maintaining centralized, vendor-specific traffic management and visibility across cloud infrastructure.
 
+## TL;DR / Quick Start
+
+To deploy this lab environment end-to-end with a single command (Terraform + post-deployment configuration):
+
+```bash
+# 1. Login to Azure
+az login
+
+# 2. Install Python dependencies (one-time)
+pip install requests
+
+# 3. Run the deployment wrapper
+python lab-deploy.py
+```
+
 ## Architecture Overview
 
 The deployment creates a complete network topology with the following design principles:

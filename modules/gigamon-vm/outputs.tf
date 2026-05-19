@@ -14,10 +14,10 @@ output "private_ip" {
 
 output "vm_id" {
   description = "The ID of the Virtual Machine."
-  value       = azurerm_linux_virtual_machine.vm.id
+  value       = azurerm_virtual_machine.vm.id
 }
 
 output "principal_id" {
   description = "System-assigned managed identity principal ID for the VM."
-  value       = azurerm_linux_virtual_machine.vm.identity[0].principal_id
+  value       = azurerm_virtual_machine.vm.identity[0].principal_id
 }
