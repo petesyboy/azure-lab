@@ -423,6 +423,7 @@ resource "local_file" "configure_script" {
     admin_username       = var.admin_username
     fm_fqdn              = module.fm.public_ip
     vseries_fqdn         = module.vseries.public_ip
+    amx_fqdn             = module.amx.public_ip
     uctv_controller_fqdn = module.uctv_controller.public_ip
     prod1_fqdn           = module.prod1.public_ip
     prod2_fqdn           = module.prod2.public_ip

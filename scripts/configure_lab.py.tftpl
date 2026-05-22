@@ -21,6 +21,7 @@ FM_URL = f"https://{FM_FQDN}"
 FM_GROUP = "${fm_group}"
 FM_SUBGROUP = "${fm_subgroup}"
 VSERIES_FQDN = "${vseries_fqdn}"
+AMX_FQDN = "${amx_fqdn}"
 UCTV_CONTROLLER_FQDN = "${uctv_controller_fqdn}"
 PROD1_FQDN = "${prod1_fqdn}"
 PROD2_FQDN = "${prod2_fqdn}"
@@ -316,10 +317,15 @@ def create_anycloud_connection(domain_id, connection_alias):
 def push_uctv_config(token):
     """Pushes the registration token and config to the UCTV Controller via SSH."""
     if not UCTV_CONTROLLER_FQDN:
+def push_node_config(token, fqdn, node_name, service_name, step_label):
+    """Pushes the registration token and config to a node via SSH."""
+    if not fqdn:
         return
         
-    print(f"\n--- Step 2/4: Register UCTV Controller via SSH ---")
+    print(f"\n--- Step 2/5: Register UCTV Controller via SSH ---")
     print(f"Pushing configuration to UCTV Controller ({UCTV_CONTROLLER_FQDN})...")
+    print(f"\n--- {step_label}: Register {node_name} via SSH ---")
+    print(f"Pushing configuration to {node_name} ({fqdn})...")
     
     config_content = f"""Registration:
   groupName: {FM_GROUP}
@@ -333,9 +339,12 @@ def push_uctv_config(token):
         "ssh", "-i", KEY_FILE, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10",
         f"{ADMIN_USER}@{UCTV_CONTROLLER_FQDN}",
         "sudo bash -c 'cat > /etc/gigamon-cloud.conf && systemctl restart --no-block uctv-cntlr'"
+        f"{ADMIN_USER}@{fqdn}",
+        f"sudo bash -c 'cat > /etc/gigamon-cloud.conf && systemctl restart --no-block {service_name}'"
     ]
     
     print(f"  Attempting SSH connection to {ADMIN_USER}@{UCTV_CONTROLLER_FQDN}...")
+    print(f"  Attempting SSH connection to {ADMIN_USER}@{fqdn}...")
     try:
         process = subprocess.run(
             ssh_cmd, 
@@ -346,6 +355,7 @@ def push_uctv_config(token):
             timeout=20
         )
         print("  [SUCCESS] Successfully wrote /etc/gigamon-cloud.conf and restarted uctv-cntlr service.")
+        print(f"  [SUCCESS] Successfully wrote /etc/gigamon-cloud.conf and restarted {service_name} service.")
     except FileNotFoundError:
         print("  [ERROR] 'ssh' command not found on PATH. Ensure SSH client is installed and accessible.")
     except subprocess.CalledProcessError as e:
@@ -363,7 +373,7 @@ def push_vseries_config(token):
     if not VSERIES_FQDN:
         return
         
-    print(f"\n--- Step 3/4: Register vSeries Node via SSH ---")
+    print(f"\n--- Step 3/5: Register vSeries Node via SSH ---")
     print(f"Pushing configuration to vSeries node ({VSERIES_FQDN})...")
     
     config_content = f"""Registration:
@@ -403,9 +413,54 @@ def push_vseries_config(token):
     except Exception as e:
         print(f"  [ERROR] Unhandled exception during SSH: {e}")
 
+def push_amx_config(token):
+    """Pushes the registration token and config to the AMX node via SSH."""
+    if not AMX_FQDN:
+        return
+        
+    print(f"\n--- Step 4/5: Register AMX Node via SSH ---")
+    print(f"Pushing configuration to AMX node ({AMX_FQDN})...")
+    
+    config_content = f"""Registration:
+  groupName: {FM_GROUP}
+  subGroupName: {FM_SUBGROUP}
+  token: {token}
+  remoteAddress: {FM_INTERNAL}
+  remotePort: 443
+"""
+    
+    ssh_cmd = [
+        "ssh", "-i", KEY_FILE, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10",
+        f"{ADMIN_USER}@{AMX_FQDN}",
+        "sudo bash -c 'cat > /etc/gigamon-cloud.conf && systemctl restart --no-block vseries-node'"
+    ]
+    
+    print(f"  Attempting SSH connection to {ADMIN_USER}@{AMX_FQDN}...")
+    try:
+        process = subprocess.run(
+            ssh_cmd, 
+            input=config_content, 
+            text=True, 
+            capture_output=True,
+            check=True,
+            timeout=20
+        )
+        print("  [SUCCESS] Successfully wrote /etc/gigamon-cloud.conf and restarted vseries-node service.")
+    except FileNotFoundError:
+        print("  [ERROR] 'ssh' command not found on PATH. Ensure SSH client is installed and accessible.")
+    except subprocess.CalledProcessError as e:
+        print(f"  [ERROR] Failed to push config via SSH.")
+        print(f"  Ensure 'lab_key.pem' is in the current directory.")
+        if e.stderr:
+            print(f"  SSH Error: {e.stderr.strip()}")
+    except subprocess.TimeoutExpired:
+        print(f"  [WARNING] SSH command timed out. The node config may still be applying.")
+    except Exception as e:
+        print(f"  [ERROR] Unhandled exception during SSH: {e}")
+
 def restart_ubuntu_agents():
     """Restarts the UCTV agent on the production Ubuntu VMs via SSH."""
-    print(f"\n--- Step 4/4: Restart Ubuntu UCTV Agents via SSH ---")
+    print(f"\n--- Step 5/5: Restart Ubuntu UCTV Agents via SSH ---")
     for fqdn, name in [(PROD1_FQDN, "prod-ubuntu-1"), (PROD2_FQDN, "prod-ubuntu-2")]:
         if not fqdn:
             continue
@@ -471,7 +526,11 @@ def check_lab_status():
     print(f"[-] vSeries Node ({VSERIES_FQDN}): ".ljust(40), end="", flush=True)
     print(check_service_status(VSERIES_FQDN, "vseries-node"))
 
-    # 4. Prod VMs
+    # 4. AMX Node
+    print(f"[-] AMX Node ({AMX_FQDN}): ".ljust(40), end="", flush=True)
+    print(check_service_status(AMX_FQDN, "vseries-node"))
+
+    # 5. Prod VMs
     print(f"[-] Prod VM 1 ({PROD1_FQDN}): ".ljust(40), end="", flush=True)
     print(check_service_status(PROD1_FQDN, "uctv"))
     
@@ -497,7 +556,7 @@ def main():
         sys.exit(1)
 
     # 1. Get FM API token (from Key Vault via Azure CLI)
-    # Note: Instructions for uploading the token are provided by the lab-deploy.py wrapper.
+    # Note: Instructions for uploading the token are provided by the ami-lab-deploy.py wrapper.
     agent_token = FM_TOKEN if FM_TOKEN else get_auth_token()
 
     # Build auth headers from the token
@@ -533,11 +592,17 @@ def main():
 
     # 3. Register the UCTV node via SSH
     push_uctv_config(agent_token)
+    push_node_config(agent_token, UCTV_CONTROLLER_FQDN, "UCTV Controller", "uctv-cntlr", "Step 2/5")
 
     # 4. Register the vSeries node via SSH
     push_vseries_config(agent_token)
+    push_node_config(agent_token, VSERIES_FQDN, "vSeries Node", "vseries-node", "Step 3/5")
 
-    # 5. Restart the production Ubuntu agents to force immediate registration
+    # 5. Register the AMX node via SSH
+    push_amx_config(agent_token)
+    push_node_config(agent_token, AMX_FQDN, "AMX Node", "vseries-node", "Step 4/5")
+
+    # 6. Restart the production Ubuntu agents to force immediate registration
     restart_ubuntu_agents()
 
     print("\n" + "="*60)
@@ -549,6 +614,7 @@ def main():
     print("\nUCT-V Agent (Workloads) registration: Handled by cloud-init + Key Vault.")
     print("UCT-V Controller registration: Handled by SSH direct push.")
     print("vSeries Node registration: Handled by SSH direct push.")
+    print("AMX Node registration: Handled by SSH direct push.")
     print("="*60)
 
 if __name__ == "__main__":
