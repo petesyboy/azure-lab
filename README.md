@@ -6,7 +6,6 @@ This repository contains Terraform Infrastructure-as-Code (IaC) and Python autom
 
 To deploy this lab environment end-to-end with a single command (Terraform + post-deployment configuration):
 
-**Bash / Linux / macOS:**
 ```bash
 # 1. Login to Azure
 az login
@@ -66,10 +65,11 @@ The deployment creates a complete network topology with the following design pri
 - Configured with VXLAN interface (vxlan0, VNI=123, dstport=4789) to receive mirrored traffic
 - Systemd service ensures VXLAN persistence across reboots
 
-**AMX Node (amx-node)**
-- Dedicated Gigamon V-Series node for Application Metadata Intelligence (AMX/AMI).
+**Cribl VM (cribl-vm)**
 - Deployed in the Visibility Subnet.
-- Processes metadata before exporting to external observability platforms like Cribl Cloud.
+- Runs Cribl Stream to receive, process, and route observability data.
+- Configured to listen for Gigamon Application Metadata Intelligence (AMI) records via IPFIX (UDP/4739).
+- Provides a destination for enriched metadata from the vSeries Node.
 
 **Production Ubuntu VM 1 (prod-ubuntu-1)**
 - Complex workload with traffic analytics
@@ -115,7 +115,8 @@ After successful deployment, the following outputs are available:
 - `fm_public_ip` - Access the GigaVUE-FM web interface (https://<IP>)
 - `uctv_public_ip` - UCT-V Controller management/troubleshooting
 - `tool_vm_public_ip` - Tool VM access (SSH, ntopng UI on port 3000)
-- `amx_public_ip` - AMX Node management/troubleshooting
+- `cribl_vm_public_ip` - Cribl VM access (SSH, Cribl UI on port 9000)
+- `cribl_vm_private_ip` - Private IP for the Cribl VM, used as an AMI export destination.
 - `vseries_public_ip` - vSeries Node management/troubleshooting
 - `prod1_public_ip` - Production Ubuntu VM 1 SSH access
 - `prod1_private_ip` - Production Ubuntu VM 1 private IP address.
@@ -151,7 +152,7 @@ This lab environment supports:
 4. **Performance Benchmarking**: iperf3 generates various load profiles
 5. **VXLAN Overlay Testing**: Test encapsulated traffic over the vSeries
 6. **Cloud-Native Design**: Full IaC approach with modular, reusable components
-7. **Metadata Enrichment**: Export Gigamon AMI records to Cribl Cloud for security and operational analytics.
+7. **Metadata Enrichment**: Export Gigamon AMI records to Cribl for security and operational analytics.
 
 ## Repository Contents
 
@@ -316,7 +317,9 @@ terraform output
 
 The output includes:
 - **IPs and URLs**: `fm_public_ip`, `tool_vm_public_ip`, `prod1_public_ip`, `prod2_public_ip`, etc.
-- **SSH Key Security**: Ensure your private key has the correct permissions (Linux/macOS):
+- **SSH Key Security**: Ensure your private key has the correct permissions:
+
+  **Linux/macOS:**
   ```bash
   chmod 400 $(terraform output -raw lab_key_file)
   ```
