@@ -79,6 +79,7 @@ resource "azurerm_resource_group" "rg" {
     owner          = var.gigamon_email
     Project        = var.project_name # Tag resources with the project name for cost tracking/management.
     DeploymentType = "connolly-demo"
+    "hours needed" = "8"
   }
 }
 
@@ -114,6 +115,7 @@ resource "azurerm_key_vault" "fm_token_kv" {
     owner          = var.gigamon_email
     Project        = var.project_name
     DeploymentType = "connolly-demo"
+    "hours needed" = "8"
   }
 }
 
@@ -135,12 +137,28 @@ resource "azurerm_storage_account" "lab_sa" {
   location                 = azurerm_resource_group.rg.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
+
+  tags = {
+    Environment    = "demo"
+    Owner          = "gigamon-terraform"
+    owner          = var.gigamon_email
+    Project        = var.project_name
+    DeploymentType = "connolly-demo"
+    "hours needed" = "8"
+  }
 }
 
 resource "azurerm_storage_container" "uctv_container" {
   name                  = "uctv-container"
   storage_account_name  = azurerm_storage_account.lab_sa.name
   container_access_type = "blob" # Public read access for blobs so VMs can curl without SAS
+}
+
+# Allow the Terraform caller to upload files to the blob container via Entra ID
+resource "azurerm_role_assignment" "storage_blob_data_contributor_current_user" {
+  scope                = azurerm_storage_account.lab_sa.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = data.azurerm_client_config.current.object_id
 }
 
 ############################################################
