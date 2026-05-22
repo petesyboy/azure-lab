@@ -6,13 +6,13 @@ locals {
   # These locals derive the correct image SKU and version strings from the `gigamon_version` variable.
   gigamon_version_sku_code = replace(var.gigamon_version, ".", "") # e.g., "6.13" -> "613"
 
-  fm_image_sku      = "gfm-azure-v${local.gigamon_version_sku_code}00"
-  fm_image_version  = "${var.gigamon_version}.00" # NOTE: This was 6.12.1099. Using .00 as a default for the new version.
+  fm_image_sku     = "gfm-azure-v${local.gigamon_version_sku_code}00"
+  fm_image_version = "${var.gigamon_version}.00" # NOTE: This was 6.12.1099. Using .00 as a default for the new version.
 
-  uctv_image_sku    = "uctv-cntlr-v${local.gigamon_version_sku_code}00"
+  uctv_image_sku     = "uctv-cntlr-v${local.gigamon_version_sku_code}00"
   uctv_image_version = "${var.gigamon_version}.00"
 
-  vseries_image_sku = "vseries-node-v${local.gigamon_version_sku_code}00"
+  vseries_image_sku     = "vseries-node-v${local.gigamon_version_sku_code}00"
   vseries_image_version = "${var.gigamon_version}.00"
 
   # Ubuntu image configuration
@@ -223,9 +223,9 @@ locals {
 
     runcmd:
       - echo "vSeries Node initialized. Waiting for configuration..."
-%{ for cmd in local.agent_standard_runcmd ~}
+%{for cmd in local.agent_standard_runcmd~}
       - ${cmd}
-%{ endfor ~}
+%{endfor~}
   EOF
 
   # Tool VM: ntopng + VXLAN termination
@@ -402,9 +402,9 @@ locals {
 
     runcmd:
       - /usr/local/sbin/download-uctv.sh
-%{ for cmd in local.agent_standard_runcmd ~}
+%{for cmd in local.agent_standard_runcmd~}
       - ${cmd}
-%{ endfor ~}
+%{endfor~}
   EOF
 
   # prod2: iperf3 + uctv-agent config placeholder
@@ -504,31 +504,8 @@ locals {
 
     runcmd:
       - /usr/local/sbin/download-uctv.sh
-%{ for cmd in local.agent_standard_runcmd ~}
+%{for cmd in local.agent_standard_runcmd~}
       - ${cmd}
-%{ endfor ~}
-  EOF
-
-  # Cribl VM: For receiving and processing Gigamon AMI records
-  cribl_vm_cloud_init = <<-EOF
-    #cloud-config
-    package_upgrade: true
-    packages:
-      - curl
-      - jq
-      - ufw
-
-    ssh_authorized_keys:
-      - ${tls_private_key.lab_key.public_key_openssh}
-
-    runcmd:
-      - echo "Installing Cribl Stream..."
-      - curl -Lso /tmp/cribl.sh https://cdn.cribl.io/dl/latest-x64 && sh /tmp/cribl.sh -g -c /opt/cribl -y
-      - /opt/cribl/bin/cribl start
-      # Add firewall exceptions (no-op if ufw is not active)
-      - ufw allow ssh || true
-      - ufw allow 9000/tcp || true # Cribl UI
-      - ufw allow 4739/udp || true # IPFIX for Gigamon AMI
-      - if [ -f /var/run/reboot-required ]; then reboot; fi
+%{endfor~}
   EOF
 }

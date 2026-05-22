@@ -133,6 +133,19 @@ resource "azurerm_network_security_group" "nsg_visibility" {
     destination_address_prefix = "*"
   }
 
+  # AMI stats reporting to FM (UDP 2056)
+  security_rule {
+    name                       = "Allow-FM-AMI-Stats-2056"
+    priority                   = 147
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Udp"
+    source_port_range          = "*"
+    destination_port_range     = "2056"
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "*"
+  }
+
   # VXLAN from UCT-V agents to vSeries (UDP 4789)
   security_rule {
     name                       = "Allow-VXLAN-4789"
@@ -195,32 +208,6 @@ resource "azurerm_network_security_group" "nsg_visibility" {
     source_port_range          = "*"
     destination_port_range     = "3000"
     source_address_prefix      = "*"
-    destination_address_prefix = "*"
-  }
-
-  # Cribl web interface (TCP 9000)
-  security_rule {
-    name                       = "Allow-Cribl-UI-9000"
-    priority                   = 181
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "9000"
-    source_address_prefix      = "*"
-    destination_address_prefix = "*"
-  }
-
-  # Gigamon AMI via IPFIX to Cribl (UDP 4739)
-  security_rule {
-    name                       = "Allow-IPFIX-4739"
-    priority                   = 182
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Udp"
-    source_port_range          = "*"
-    destination_port_range     = "4739"
-    source_address_prefix      = "VirtualNetwork" # Only from within the VNet
     destination_address_prefix = "*"
   }
 

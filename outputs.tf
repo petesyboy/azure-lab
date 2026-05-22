@@ -58,19 +58,14 @@ output "vseries_public_ip" {
   description = "The public IP address of the vSeries Node"
 }
 
+output "amx_public_ip" {
+  value       = module.amx.public_ip
+  description = "The public IP address of the AMX Node"
+}
+
 output "tool_vm_public_ip" {
   value       = module.tool_vm.public_ip
   description = "The public IP address of the Tool VM"
-}
-
-output "cribl_vm_public_ip" {
-  value       = module.cribl_vm.public_ip
-  description = "The public IP address of the Cribl VM"
-}
-
-output "cribl_vm_private_ip" {
-  value       = module.cribl_vm.private_ip
-  description = "The private IP address of the Cribl VM"
 }
 
 output "prod1_public_ip" {
@@ -108,14 +103,14 @@ output "ssh_vseries" {
   description = "SSH command for vSeries Node"
 }
 
+output "ssh_amx" {
+  value       = "ssh -i ./lab_key.pem ${var.admin_username}@${module.amx.public_ip}"
+  description = "SSH command for AMX Node"
+}
+
 output "ssh_tool_vm" {
   value       = "ssh -i ./lab_key.pem ${var.admin_username}@${module.tool_vm.public_ip}"
   description = "SSH command for Tool VM"
-}
-
-output "ssh_cribl_vm" {
-  value       = "ssh -i ./lab_key.pem ${var.admin_username}@${module.cribl_vm.public_ip}"
-  description = "SSH command for Cribl VM"
 }
 
 output "ssh_prod1" {
@@ -131,9 +126,4 @@ output "ssh_prod2" {
 output "ntopng_ui_url" {
   value       = "http://${module.tool_vm.public_ip}:3000"
   description = "Clickable URL for the ntopng Web UI on the Tool VM"
-}
-
-output "cribl_ui_url" {
-  value       = "http://${module.cribl_vm.public_ip}:9000"
-  description = "Clickable URL for the Cribl Stream Web UI on the Cribl VM"
 }

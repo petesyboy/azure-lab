@@ -269,6 +269,42 @@ module "vseries" {
   create_secondary_nic = true
 }
 
+############################################################
+# AMX Node
+############################################################
+
+# -----------------------------------------------------------------------------
+# AMX Node (V-Series Instance for Application Metadata)
+# -----------------------------------------------------------------------------
+module "amx" {
+  source = "./modules/gigamon-vm"
+
+  vm_name             = "connolly-amx-node"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  subnet_id           = module.networking.visibility_subnet_id # Deployed in Visibility Subnet
+  vm_size             = var.vseries_vm_size
+  admin_username      = var.admin_username
+  ssh_public_key      = tls_private_key.lab_key.public_key_openssh
+  image_publisher     = var.gigamon_image_publisher
+  image_offer         = var.gigamon_image_offer
+  image_sku           = local.vseries_image_sku
+  image_version       = local.vseries_image_version
+  custom_data         = base64encode(local.vseries_cloud_init) # Shares identical cloud-init with vSeries
+  os_disk_name        = "osdisk-amx"
+  pip_name            = "pip-amx"
+  nic_name            = "nic-amx-mgmt"
+  ip_config_name      = "ipconfig-amx"
+  role_tag            = "amx"
+  owner_email         = var.gigamon_email
+  project_tag         = var.project_name
+
+  # Second NIC for data-plane (connects to production subnet)
+  secondary_subnet_id  = module.networking.production_subnet_id
+  secondary_nic_name   = "nic-amx-data"
+  create_secondary_nic = true
+}
+
 # Cloud-init scripts for all VMs are defined in locals.tf
 
 ############################################################
@@ -362,33 +398,6 @@ module "prod2" {
 }
 
 # -----------------------------------------------------------------------------
-# Cribl VM (AMI Destination)
-# -----------------------------------------------------------------------------
-module "cribl_vm" {
-  source = "./modules/linux-vm"
-
-  vm_name             = "connolly-cribl-vm"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
-  subnet_id           = module.networking.visibility_subnet_id # Deployed in Visibility Subnet
-  vm_size             = var.ubuntu_vm_size                     # Can be adjusted if needed
-  admin_username      = var.admin_username
-  ssh_public_key      = tls_private_key.lab_key.public_key_openssh
-  image_publisher     = local.ubuntu_publisher
-  image_offer         = local.ubuntu_offer
-  image_sku           = local.ubuntu_sku
-  image_version       = local.ubuntu_version
-  custom_data         = base64encode(local.cribl_vm_cloud_init)
-  os_disk_name        = "osdisk-cribl"
-  pip_name            = "pip-cribl"
-  nic_name            = "nic-cribl"
-  ip_config_name      = "ipconfig-cribl"
-  role_tag            = "cribl-vm"
-  owner_email         = var.gigamon_email
-  project_tag         = var.project_name
-}
-
-# -----------------------------------------------------------------------------
 # Orchestration
 # -----------------------------------------------------------------------------
 
@@ -396,6 +405,7 @@ resource "azurerm_role_assignment" "kv_secrets_users" {
   for_each = {
     uctv    = module.uctv_controller.principal_id
     vseries = module.vseries.principal_id
+    amx     = module.amx.principal_id
     prod1   = module.prod1.principal_id
     prod2   = module.prod2.principal_id
   }
