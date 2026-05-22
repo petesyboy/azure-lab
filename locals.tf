@@ -23,24 +23,26 @@ locals {
 
   # FM Cloud-Init: Minimal init.
   # Configuration is handled post-deployment via API.
-  fm_cloud_init = <<-EOF
+  fm_cloud_init = replace(<<-EOF
     #cloud-config
     packages: []
     runcmd:
       - echo "GigaVUE-FM ${var.gigamon_version} initializing..."
   EOF
+  , "\r", "")
 
   # UCT-V Controller Cloud-Init
   # Configuration is handled post-deployment via SSH direct push.
-  uctv_cloud_init = <<-EOF
+  uctv_cloud_init = replace(<<-EOF
     #cloud-config
     packages: []
     runcmd:
       - echo "UCT-V Controller initialized. Waiting for configuration via SSH..."
   EOF
+  , "\r", "")
 
   # Reusable Bash Script for fetching tokens from Key Vault
-  shared_token_fetch_script = <<-EOF
+  shared_token_fetch_script = replace(<<-EOF
     #!/usr/bin/env bash
     set -euo pipefail
     LOG="/var/log/gigamon-bootstrap.log"
@@ -84,10 +86,11 @@ locals {
     systemctl start gigamon-agent-refresh.service >/dev/null 2>&1 || true
     systemctl disable --now fm-token-fetch.timer >/dev/null 2>&1 || true
   EOF
+  , "\r", "")
 
   # Reusable Bash Script for refreshing the agent service
   # Note: ${1} is passed from the cloud-init path definition
-  shared_agent_refresh_script = <<-EOF
+  shared_agent_refresh_script = replace(<<-EOF
     #!/usr/bin/env bash
     set -euo pipefail
     LOG="/var/log/gigamon-bootstrap.log"
@@ -102,9 +105,10 @@ locals {
       fi
     done
   EOF
+  , "\r", "")
 
   # Reusable UCT-V Download logic
-  shared_uctv_download_script = <<-EOF
+  shared_uctv_download_script = replace(<<-EOF
     #!/usr/bin/env bash
     set -euo pipefail
     LOG="/var/log/gigamon-bootstrap.log"
@@ -130,6 +134,7 @@ locals {
       exit 1
     fi
   EOF
+  , "\r", "")
 
   # Standard runcmd for agents
   agent_standard_runcmd = [
@@ -142,7 +147,7 @@ locals {
   ]
 
   # vSeries Cloud-Init
-  vseries_cloud_init = <<-EOF
+  vseries_cloud_init = replace(<<-EOF
     #cloud-config
     write_files:
       - path: /etc/gigamon-cloud.conf
@@ -227,10 +232,11 @@ locals {
       - ${cmd}
 %{endfor~}
   EOF
+  , "\r", "")
 
   # Tool VM: ntopng + VXLAN termination
   # Deployed in Visibility Subnet
-  tool_vm_cloud_init = <<-EOF
+  tool_vm_cloud_init = replace(<<-EOF
     #cloud-config
     package_upgrade: true
     packages:
@@ -303,10 +309,11 @@ locals {
       - ufw allow from uctv.connolly.lab || true
       - if [ -f /var/run/reboot-required ]; then reboot; fi
   EOF
+  , "\r", "")
 
   # prod1: iperf3 + uctv-agent config placeholder
   # Removed ntopng/vxlan from here
-  prod1_cloud_init = <<-EOF
+  prod1_cloud_init = replace(<<-EOF
     #cloud-config
     package_upgrade: true
     packages:
@@ -406,9 +413,10 @@ locals {
       - ${cmd}
 %{endfor~}
   EOF
+  , "\r", "")
 
   # prod2: iperf3 + uctv-agent config placeholder
-  prod2_cloud_init = <<-EOF
+  prod2_cloud_init = replace(<<-EOF
     #cloud-config
     package_upgrade: true
     packages:
@@ -508,4 +516,5 @@ locals {
       - ${cmd}
 %{endfor~}
   EOF
+  , "\r", "")
 }

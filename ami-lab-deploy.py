@@ -25,7 +25,7 @@ def check_dependencies():
 
 def main():
     print("======================================================")
-    print(" Azure Lab 6.12 - Gigamon V Series Deployment Wrapper ")
+    print(" Azure Lab 6.1x - Gigamon V Series Deployment Wrapper ")
     print("======================================================")
     
     # 0. Check dependencies
