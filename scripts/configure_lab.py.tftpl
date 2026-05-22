@@ -150,6 +150,50 @@ def get_auth_token():
         print(f"An unexpected error occurred while retrieving the token: {e}")
         sys.exit(1)
 
+def validate_and_update_token(token):
+    """Checks if the current token is valid. If Unauthorized/Forbidden, prompts for a new one and updates KV."""
+    global AUTH_HEADERS
+    while True:
+        print("\nVerifying FM API token validity...")
+        test_url = f"{FM_URL}/api/v1.3/cloud/monitoringDomains"
+        try:
+            resp = requests.get(test_url, headers=AUTH_HEADERS, verify=False, timeout=10)
+            if resp.status_code in [401, 403]:
+                print("\n" + "!"*60)
+                print(f"[!] The provided FM API token was rejected (HTTP {resp.status_code}).")
+                print("It may have expired or have insufficient privileges.")
+                print("!"*60 + "\n")
+                new_token = input("Please paste a valid FM API Token: ").strip()
+                if not new_token:
+                    print("Error: Token cannot be empty.")
+                    sys.exit(1)
+                
+                print(f"\nUploading new token to Key Vault '{KEY_VAULT_NAME}'...")
+                az_cmd = shutil.which("az") or ("az.cmd" if os.name == 'nt' else "az")
+                upload_cmd = [
+                    az_cmd, "keyvault", "secret", "set",
+                    "--vault-name", KEY_VAULT_NAME,
+                    "--name", FM_TOKEN_SECRET_NAME,
+                    "--value", new_token
+                ]
+                try:
+                    subprocess.run(upload_cmd, capture_output=True, text=True, check=True)
+                    print("Successfully updated token in Key Vault.")
+                    print("Waiting 10 seconds for Key Vault changes to propagate...")
+                    time.sleep(10)
+                except subprocess.CalledProcessError as e:
+                    print(f"Failed to update token in Key Vault: {e}")
+                
+                # Update local token and headers, then loop to re-verify
+                token = new_token
+                AUTH_HEADERS["Authorization"] = f"Bearer {token}"
+            else:
+                print("Token is valid!")
+                return token
+        except Exception as e:
+            print(f"Failed to connect to FM during token verification: {e}")
+            return token
+
 def create_monitoring_domain(domain_alias):
     """Creates the Monitoring Domain via FM API using 'anyCloud' platform."""
     url = f"{FM_URL}/api/v1.3/cloud/monitoringDomains"
@@ -467,6 +511,9 @@ def main():
         "Accept": "application/json",
         "Authorization": f"Bearer {agent_token}"
     }
+
+    # Validate and potentially update the token if unauthorized
+    agent_token = validate_and_update_token(agent_token)
 
     monitoring_domain = FM_GROUP
     subgroup_name = FM_SUBGROUP

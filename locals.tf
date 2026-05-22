@@ -117,7 +117,7 @@ locals {
     echo "[$(date)] Downloading UCT-V agent..."
     sleep 20
     AGENT_URL="${azurerm_storage_account.lab_sa.primary_blob_endpoint}${azurerm_storage_container.uctv_container.name}/gigamon-gigavue-uctv-${local.uctv_image_version}-amd64.deb"
-    for i in {1..10}; do
+    for i in {1..30}; do
       if curl -fSL --retry 5 "$${AGENT_URL}" -o /tmp/uctv-agent.deb; then
         echo "Download successful."
         break
