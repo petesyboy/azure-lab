@@ -23,7 +23,14 @@ python ami-lab-deploy.py
 ```
 
 ## Prerequisites & Marketplace Terms
-Ensure you have Terraform >= 1.5.0, Azure CLI, and Python 3 installed. You **must** accept the Azure Marketplace terms for the Gigamon images before deploying:
+Ensure you have Terraform >= 1.5.0, Azure CLI, and Python 3 installed.
+
+> [!IMPORTANT]
+> **UCT-V Agent Package Requirement**  
+> Prior to running the deployment script, you **must** place the UCT-V agent Debian package (e.g., `gigamon-gigavue-uctv-6.13.00-amd64.deb` matching your configured `gigamon_version` in `variables.tf`) in the workspace root directory. The deployment script performs a pre-flight check to verify this file exists and will halt with an error if it is missing.
+
+You **must** accept the Azure Marketplace terms for the Gigamon images before deploying:
+
 
 ```bash
 az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-suite-v2 --plan gfm-azure-v61300
@@ -51,6 +58,15 @@ SECRET_NAME="$(terraform output -raw fm_token_secret_name)"
 az keyvault secret set --vault-name "$KV_NAME" --name "$SECRET_NAME" --value "<PASTE_FM_TOKEN_HERE>"
 ```
 *Note: Agents automatically fetch this token from the Key Vault via managed identity to self-register.*
+
+## Create the Monitoring Session yourself.
+
+1. Login to GigaVUE-FM.
+2. Click on **Monitor ** in the left pane.
+3. Click on **Monitoring Session**.
+4. Click on **New Session**.
+5. Add in the map and tunnel (the IP address of the NtopNG VM and port 4789) as the tunnel endpoint.
+5. Click on **Save**.
 
 ## Usage & Verification
 

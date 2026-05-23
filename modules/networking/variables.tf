@@ -21,3 +21,8 @@ variable "project_tag" {
   type        = string
   description = "Value for the Project tag."
 }
+
+variable "allowed_mgmt_ip" {
+  type        = string
+  description = "The IP address or CIDR range allowed for management access."
+}

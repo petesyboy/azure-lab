@@ -29,6 +29,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 3.100"
     }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.0"
+    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"
@@ -59,6 +63,15 @@ provider "azurerm" {
       prevent_deletion_if_contains_resources = false
     }
   }
+}
+
+data "http" "deployer_ip" {
+  count = var.allowed_mgmt_ip == "dynamic" ? 1 : 0
+  url   = "https://ipv4.icanhazip.com"
+}
+
+locals {
+  resolved_mgmt_ip = var.allowed_mgmt_ip == "dynamic" ? "${chomp(data.http.deployer_ip[0].response_body)}/32" : var.allowed_mgmt_ip
 }
 
 ############################################################
@@ -154,6 +167,20 @@ resource "azurerm_storage_container" "uctv_container" {
   container_access_type = "blob" # Public read access for blobs so VMs can curl without SAS
 }
 
+resource "azurerm_storage_blob" "uctv_agent_package" {
+  name                   = "gigamon-gigavue-uctv-${var.gigamon_version}.00-amd64.deb"
+  storage_account_name   = azurerm_storage_account.lab_sa.name
+  storage_container_name = azurerm_storage_container.uctv_container.name
+  type                   = "Block"
+  source                 = "${path.module}/gigamon-gigavue-uctv-${var.gigamon_version}.00-amd64.deb"
+
+  # Wait for storage container to exist and permissions to propagate
+  depends_on = [
+    azurerm_storage_container.uctv_container,
+    azurerm_role_assignment.storage_blob_data_contributor_current_user
+  ]
+}
+
 # Allow the Terraform caller to upload files to the blob container via Entra ID
 resource "azurerm_role_assignment" "storage_blob_data_contributor_current_user" {
   scope                = azurerm_storage_account.lab_sa.id
@@ -180,6 +207,7 @@ module "networking" {
   location            = azurerm_resource_group.rg.location
   owner_email         = var.gigamon_email
   project_tag         = var.project_name
+  allowed_mgmt_ip     = local.resolved_mgmt_ip
 }
 
 ############################################################
