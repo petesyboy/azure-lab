@@ -102,3 +102,9 @@ Run `iperf3` between the two production VMs to generate inspectable traffic:
 ### 3. Verify Visibility
 - **ntopng**: Access `http://<tool_vm_public_ip>:3000` (admin/admin), select the `vxlan0` interface to see real-time mirrored traffic.
 - **Raw Packet Dump**: Run `sudo tcpdump -i vxlan0 -n` on the Tool VM.
+
+---
+
+## Support & Contact
+For questions, issues, or contributions regarding this lab configuration, please reach out to:
+* **Contact**: [pete.connolly@gigamon.com](mailto:pete.connolly@gigamon.com)
