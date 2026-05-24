@@ -52,12 +52,19 @@ GigaVUE-FM requires a manual password change and token generation before the fab
 2. **Login & Change Password**: Use `admin` / `admin123A!!`. Uncheck SSH Key-Based Auth.
 3. **Generate Token**: Navigate to **Administration → User Management → Tokens → Current User Tokens**. Create a new token (105 days, Super Admin Group) and **copy it**.
 4. **Upload Token to Key Vault**:
+
+### Bash / Linux
 ```bash
 KV_NAME="$(terraform output -raw key_vault_name)"
 SECRET_NAME="$(terraform output -raw fm_token_secret_name)"
 az keyvault secret set --vault-name "$KV_NAME" --name "$SECRET_NAME" --value "<PASTE_FM_TOKEN_HERE>"
+```
 
-eyJhbGciOiJIUzI1NiJ9.eyJ0b2tlbklkIjoiODkwNTc3NzgzMTg3NzQxOSIsInN1YiI6IjNQTyIsImlhdCI6MTc3OTU0MDYyNiwiZXhwIjoxNzg4NjEyNjI2fQ.dUdD7Iu_CUnUgM9OB5HttQ0uRiw7R0vtxIB94KS-_sc
+### PowerShell / Windows
+```powershell
+$KV_NAME = terraform output -raw key_vault_name
+$SECRET_NAME = terraform output -raw fm_token_secret_name
+az keyvault secret set --vault-name $KV_NAME --name $SECRET_NAME --value "<PASTE_FM_TOKEN_HERE>"
 ```
 *Note: Agents automatically fetch this token from the Key Vault via managed identity to self-register.*
 
@@ -74,10 +81,18 @@ eyJhbGciOiJIUzI1NiJ9.eyJ0b2tlbklkIjoiODkwNTc3NzgzMTg3NzQxOSIsInN1YiI6IjNQTyIsIml
 
 ### 1. SSH Access
 Retrieve ready-to-use SSH commands from Terraform:
+
+#### Bash / Linux
 ```bash
 terraform output | grep ssh_
 ```
+
+#### PowerShell / Windows
+```powershell
+terraform output | Select-String "ssh_"
+```
 *(Example: `ssh -i ./lab_key.pem peter@<ip>`)*
+
 
 ### 2. Generate Traffic
 Run `iperf3` between the two production VMs to generate inspectable traffic:

@@ -135,12 +135,6 @@ variable "fm_token_secret_name" {
   default     = "gigamon-fm-token"
 }
 
-variable "uctv_agent_base_url" {
-  type        = string
-  description = "The base URL for the UCT-V agent Debian package location (Blob Storage container)."
-  default     = "https://<YOUR_ACTUAL_STORAGE_ACCOUNT_NAME>.blob.core.windows.net/uctv-agents"
-}
-
 variable "allowed_mgmt_ip" {
   type        = string
   description = "The IP address or CIDR range allowed for management access (SSH, HTTPS, HTTP, ntopng UI). If set to 'dynamic' (default), it will fetch the deployer's public IP dynamically using https://ipv4.icanhazip.com."

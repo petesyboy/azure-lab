@@ -90,7 +90,7 @@ resource "azurerm_network_security_group" "nsg_visibility" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "5671"
-    source_address_prefix      = "*"
+    source_address_prefix      = "VirtualNetwork"
     destination_address_prefix = "*"
   }
 
@@ -103,7 +103,7 @@ resource "azurerm_network_security_group" "nsg_visibility" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "9900"
-    source_address_prefix      = "*"
+    source_address_prefix      = "VirtualNetwork"
     destination_address_prefix = "*"
   }
 
@@ -116,7 +116,7 @@ resource "azurerm_network_security_group" "nsg_visibility" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "8892"
-    source_address_prefix      = "*"
+    source_address_prefix      = "VirtualNetwork"
     destination_address_prefix = "*"
   }
 
@@ -129,7 +129,7 @@ resource "azurerm_network_security_group" "nsg_visibility" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "8889"
-    source_address_prefix      = "*"
+    source_address_prefix      = "VirtualNetwork"
     destination_address_prefix = "*"
   }
 
@@ -220,7 +220,7 @@ resource "azurerm_network_security_group" "nsg_visibility" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "9902"
-    source_address_prefix      = "*"
+    source_address_prefix      = "VirtualNetwork"
     destination_address_prefix = "*"
   }
 
@@ -233,7 +233,7 @@ resource "azurerm_network_security_group" "nsg_visibility" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "8300"
-    source_address_prefix      = "*"
+    source_address_prefix      = "VirtualNetwork"
     destination_address_prefix = "*"
   }
 }
