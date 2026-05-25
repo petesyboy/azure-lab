@@ -234,7 +234,7 @@ module "fm" {
   image_offer         = var.gigamon_image_offer
   image_sku           = local.fm_image_sku
   image_version       = local.fm_image_version
-  custom_data         = base64encode(local.fm_cloud_init)
+  custom_data         = local.fm_cloud_init
   os_disk_name        = "osdisk-fm-${replace(var.gigamon_version, ".", "")}"
   pip_name            = "pip-fm" # Public IP for FM access
   nic_name            = "nic-fm"
@@ -242,6 +242,14 @@ module "fm" {
   role_tag            = "fm"
   owner_email         = var.gigamon_email
   project_tag         = var.project_name
+
+  data_disks = [
+    {
+      lun               = 0
+      managed_disk_type = "Premium_LRS"
+      disk_size_gb      = 40
+    }
+  ]
 }
 
 ############################################################
@@ -267,7 +275,7 @@ module "uctv_controller" {
   image_offer         = var.gigamon_image_offer
   image_sku           = local.uctv_image_sku
   image_version       = local.uctv_image_version
-  custom_data         = base64encode(local.uctv_cloud_init)
+  custom_data         = local.uctv_cloud_init
   os_disk_name        = "osdisk-uctv"
   pip_name            = "pip-uctv"
   nic_name            = "nic-uctv"
@@ -300,7 +308,7 @@ module "vseries" {
   image_offer         = var.gigamon_image_offer
   image_sku           = local.vseries_image_sku
   image_version       = local.vseries_image_version
-  custom_data         = base64encode(local.vseries_cloud_init)
+  custom_data         = local.vseries_cloud_init
   os_disk_name        = "osdisk-vseries"
   pip_name            = "pip-vseries"
   nic_name            = "nic-vseries-mgmt"
@@ -336,7 +344,7 @@ module "amx" {
   image_offer         = var.gigamon_image_offer
   image_sku           = local.vseries_image_sku
   image_version       = local.vseries_image_version
-  custom_data         = base64encode(local.vseries_cloud_init) # Shares identical cloud-init with vSeries
+  custom_data         = local.vseries_cloud_init # Shares identical cloud-init with vSeries
   os_disk_name        = "osdisk-amx"
   pip_name            = "pip-amx"
   nic_name            = "nic-amx-mgmt"

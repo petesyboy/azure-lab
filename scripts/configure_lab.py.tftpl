@@ -85,70 +85,6 @@ def check_fm_accessible():
         
     print("\nTimeout waiting for FM API. Please check the VM status.")
     return False
-
-def bootstrap_fm_token():
-    """
-    Attempts to automatically authenticate against GigaVUE-FM using the default credentials,
-    generate a long-lived API token, and return it.
-    """
-    print("\nAttempting automatic bootstrapping and token retrieval from GigaVUE-FM...")
-    
-    # 1. Log in with the default credentials
-    login_url = f"{FM_URL}/api/v1.3/login"
-    login_payload = {
-        "username": "admin",
-        "password": "admin123A!!"
-    }
-    
-    try:
-        resp = requests.post(login_url, json=login_payload, verify=False, timeout=15)
-        if resp.status_code != 200:
-            print(f"[!] Automatic login with default credentials failed (HTTP {resp.status_code}).")
-            return None
-        
-        session_token = resp.json().get("token")
-        if not session_token:
-            print("[!] No session token found in the GigaVUE-FM login response.")
-            return None
-            
-        print("Successfully logged in with default credentials. Attempting to generate a long-lived API token...")
-        
-        # 2. Try to generate a long-lived API token (105 days)
-        token_headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {session_token}"
-        }
-        token_payload = {
-            "name": "lab-bootstrap-token",
-            "expiryDays": 105
-        }
-        
-        # We try both potential token endpoints for GigaVUE-FM versions
-        token = None
-        for endpoint in ["/api/v1.3/user/tokens", "/api/v1.3/tokens"]:
-            token_url = f"{FM_URL}{endpoint}"
-            try:
-                t_resp = requests.post(token_url, json=token_payload, headers=token_headers, verify=False, timeout=15)
-                if t_resp.status_code in [200, 201]:
-                    token = t_resp.json().get("token")
-                    if token:
-                        print(f"Successfully generated a 105-day API token via {endpoint}.")
-                        break
-            except Exception:
-                pass
-                
-        # If long-lived token generation is not supported or failed, fall back to the session token!
-        if not token:
-            print("[WARNING] Could not generate a long-lived API token. Falling back to the 24-hour session token.")
-            token = session_token
-            
-        return token
-        
-    except Exception as e:
-        print(f"[!] Connection to GigaVUE-FM failed during bootstrapping: {e}")
-        return None
-
 def upload_token_to_keyvault(az_cmd, token):
     """
     Uploads the FM token to Key Vault.
@@ -202,54 +138,56 @@ def upload_token_to_keyvault(az_cmd, token):
     print("Waiting 10 seconds for Key Vault changes to propagate...")
     time.sleep(10)
 
+def delete_keyvault_secret(az_cmd):
+    """
+    Deletes and purges any existing token secret in the Key Vault
+    to ensure old tokens are fully cleaned up.
+    """
+    print(f"\nCleaning up any existing token secret '{FM_TOKEN_SECRET_NAME}' in Key Vault '{KEY_VAULT_NAME}'...")
+    delete_cmd = [
+        az_cmd, "keyvault", "secret", "delete",
+        "--vault-name", KEY_VAULT_NAME,
+        "--name", FM_TOKEN_SECRET_NAME
+    ]
+    purge_cmd = [
+        az_cmd, "keyvault", "secret", "purge",
+        "--vault-name", KEY_VAULT_NAME,
+        "--name", FM_TOKEN_SECRET_NAME
+    ]
+    try:
+        # Delete secret (non-fatal if the secret does not exist)
+        subprocess.run(delete_cmd, capture_output=True, check=False)
+        # Purge secret (non-fatal if the secret does not exist)
+        subprocess.run(purge_cmd, capture_output=True, check=False)
+        print("Key Vault cleaned up successfully.")
+    except Exception as e:
+        print(f"Note: Key Vault cleanup encountered an issue (non-fatal): {e}")
+
 def get_auth_token():
     """
-    Retrieves the FM API token directly from Azure Key Vault using the Azure CLI.
-    If not found, attempts to dynamically bootstrap it via FM REST API.
-    If bootstrapping fails, prompts the user to enter it.
+    Cleans up any existing token in Key Vault, then prompts the user
+    to enter the GigaVUE-FM API token directly and uploads it.
     """
-    print(f"Checking Azure Key Vault '{KEY_VAULT_NAME}' for secret '{FM_TOKEN_SECRET_NAME}'...")
     az_cmd = shutil.which("az") or ("az.cmd" if os.name == 'nt' else "az")
+    delete_keyvault_secret(az_cmd)
 
-    try:
-        cmd = [
-            az_cmd, "keyvault", "secret", "show",
-            "--vault-name", KEY_VAULT_NAME,
-            "--name", FM_TOKEN_SECRET_NAME,
-            "--query", "value",
-            "-o", "tsv"
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        token = result.stdout.strip()
-        if token:
-            print("Successfully retrieved token from Key Vault.")
-            return token
-    except subprocess.CalledProcessError:
-        # Secret likely doesn't exist yet, proceed to bootstrap
-        pass
-
-    # Try automatic bootstrapping first
-    token = bootstrap_fm_token()
-
+    print("\n" + "!"*60)
+    print(f"Please log in to GigaVUE-FM at {FM_URL}")
+    print("1. Change the default password (admin / admin123A!!)")
+    print("2. Go to Administration -> User Management -> Tokens")
+    print("3. Generate a new token (e.g., 105 days, Super Admin Group)")
+    print("!"*60 + "\n")
+    
+    token = input("Paste your FM API Token here: ").strip()
     if not token:
-        print("\n" + "!"*60)
-        print("Automatic bootstrapping failed or could not be completed.")
-        print(f"Please log in to GigaVUE-FM at {FM_URL}")
-        print("1. Change the default password (admin / admin123A!!)")
-        print("2. Go to Administration -> User Management -> Tokens")
-        print("3. Generate a new token (e.g., 105 days, Super Admin Group)")
-        print("!"*60 + "\n")
-        
-        token = input("Paste your FM API Token here: ").strip()
-        if not token:
-            print("Error: Token cannot be empty.")
-            sys.exit(1)
+        print("Error: Token cannot be empty.")
+        sys.exit(1)
 
     upload_token_to_keyvault(az_cmd, token)
     return token
 
 def validate_and_update_token(token):
-    """Checks if the current token is valid. If Unauthorized/Forbidden, attempts to bootstrap a new one."""
+    """Checks if the current token is valid. If Unauthorized/Forbidden, prompts for a new one."""
     global AUTH_HEADERS
     while True:
         print("\nVerifying FM API token validity...")
@@ -260,15 +198,12 @@ def validate_and_update_token(token):
                 print("\n" + "!"*60)
                 print(f"[!] The provided FM API token was rejected (HTTP {resp.status_code}).")
                 print("It may have expired or have insufficient privileges.")
-                print("Attempting to automatically re-bootstrap a new token...")
                 print("!"*60 + "\n")
                 
-                new_token = bootstrap_fm_token()
+                new_token = input("Please paste a valid FM API Token: ").strip()
                 if not new_token:
-                    new_token = input("Please paste a valid FM API Token: ").strip()
-                    if not new_token:
-                        print("Error: Token cannot be empty.")
-                        sys.exit(1)
+                    print("Error: Token cannot be empty.")
+                    sys.exit(1)
                 
                 az_cmd = shutil.which("az") or ("az.cmd" if os.name == 'nt' else "az")
                 try:

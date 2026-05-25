@@ -94,7 +94,7 @@ variable "project_tag" {
 variable "custom_data" {
   type        = string
   default     = ""
-  description = "Base64-encoded cloud-init or custom data script to execute on first boot."
+  description = "Cloud-init or custom data script to execute on first boot."
 }
 
 variable "secondary_subnet_id" {
@@ -113,4 +113,14 @@ variable "create_secondary_nic" {
   type        = bool
   default     = false
   description = "Set to true to create a second NIC. Required because count cannot depend on computed values like subnet IDs."
+}
+
+variable "data_disks" {
+  type = list(object({
+    lun               = number
+    disk_size_gb      = optional(number)
+    managed_disk_type = string
+  }))
+  default     = []
+  description = "List of data disks required by the image."
 }

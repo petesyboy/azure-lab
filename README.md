@@ -107,4 +107,4 @@ Run `iperf3` between the two production VMs to generate inspectable traffic:
 
 ## Support & Contact
 For questions, issues, or contributions regarding this lab configuration, please reach out to:
-* **Contact**: [pete.connolly@gigamon.com](mailto:pete.connolly@gigamon.com)
+* **Contact**: [pete.connolly@gigamon.com][def]

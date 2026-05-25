@@ -127,3 +127,8 @@ output "ntopng_ui_url" {
   value       = "http://${module.tool_vm.public_ip}:3000"
   description = "Clickable URL for the ntopng Web UI on the Tool VM"
 }
+
+output "deployer_public_ip" {
+  value       = local.resolved_mgmt_ip
+  description = "The public IP address or CIDR range allowed for management access."
+}

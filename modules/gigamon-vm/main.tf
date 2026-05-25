@@ -38,15 +38,19 @@ resource "azurerm_network_interface" "nic2" {
   }
 }
 
-resource "azurerm_linux_virtual_machine" "vm" {
-  name                  = var.vm_name
-  location              = var.location
-  resource_group_name   = var.resource_group_name
+resource "azurerm_virtual_machine" "vm" {
+  name                = var.vm_name
+  location            = var.location
+  resource_group_name = var.resource_group_name
   network_interface_ids = var.create_secondary_nic ? [
     azurerm_network_interface.nic.id,
     azurerm_network_interface.nic2[0].id
   ] : [azurerm_network_interface.nic.id]
-  size                  = var.vm_size
+  primary_network_interface_id = azurerm_network_interface.nic.id
+  vm_size = var.vm_size
+
+  delete_os_disk_on_termination    = true
+  delete_data_disks_on_termination = true
 
   identity {
     type = "SystemAssigned"
@@ -58,27 +62,43 @@ resource "azurerm_linux_virtual_machine" "vm" {
     product   = var.image_offer
   }
 
-  source_image_reference {
+  storage_image_reference {
     publisher = var.image_publisher
     offer     = var.image_offer
     sku       = var.image_sku
     version   = var.image_version
   }
 
-  os_disk {
-    name                 = var.os_disk_name
-    caching              = "ReadWrite"
-    storage_account_type = "Premium_LRS"
+  storage_os_disk {
+    name              = var.os_disk_name
+    caching           = "ReadWrite"
+    create_option     = "FromImage"
+    managed_disk_type = "Premium_LRS"
   }
 
-  computer_name  = var.vm_name
-  admin_username = var.admin_username
-  custom_data    = var.custom_data != "" ? var.custom_data : null
+  dynamic "storage_data_disk" {
+    for_each = var.data_disks
+    content {
+      name              = "${var.vm_name}-datadisk-${storage_data_disk.value.lun}"
+      create_option     = "FromImage"
+      lun               = storage_data_disk.value.lun
+      managed_disk_type = storage_data_disk.value.managed_disk_type
+      disk_size_gb      = storage_data_disk.value.disk_size_gb
+    }
+  }
 
-  disable_password_authentication = true
-  admin_ssh_key {
-    username   = var.admin_username
-    public_key = var.ssh_public_key
+  os_profile {
+    computer_name  = var.vm_name
+    admin_username = var.admin_username
+    custom_data    = var.custom_data != "" ? var.custom_data : null
+  }
+
+  os_profile_linux_config {
+    disable_password_authentication = true
+    ssh_keys {
+      path     = "/home/${var.admin_username}/.ssh/authorized_keys"
+      key_data = var.ssh_public_key
+    }
   }
 
   tags = {
@@ -89,8 +109,8 @@ resource "azurerm_linux_virtual_machine" "vm" {
 }
 
 resource "azurerm_dev_test_global_vm_shutdown_schedule" "shutdown" {
-  virtual_machine_id = azurerm_linux_virtual_machine.vm.id
-  location           = azurerm_linux_virtual_machine.vm.location
+  virtual_machine_id = azurerm_virtual_machine.vm.id
+  location           = azurerm_virtual_machine.vm.location
   enabled            = true
 
   daily_recurrence_time = "1900"
