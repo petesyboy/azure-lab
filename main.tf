@@ -172,7 +172,7 @@ resource "azurerm_storage_blob" "uctv_agent_package" {
   storage_account_name   = azurerm_storage_account.lab_sa.name
   storage_container_name = azurerm_storage_container.uctv_container.name
   type                   = "Block"
-  source                 = "${path.module}/gigamon-gigavue-uctv-${var.gigamon_version}.00-amd64.deb"
+  source                 = "${path.module}/UCTV-files/gigamon-gigavue-uctv-${var.gigamon_version}.00-amd64.deb"
 
   # Wait for storage container to exist and permissions to propagate
   depends_on = [

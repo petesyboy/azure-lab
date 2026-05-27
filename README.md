@@ -27,7 +27,7 @@ Ensure you have Terraform >= 1.5.0, Azure CLI, and Python 3 installed.
 
 > [!IMPORTANT]
 > **UCT-V Agent Package Requirement**  
-> Prior to running the deployment script, you **must** place the UCT-V agent Debian package (e.g., `gigamon-gigavue-uctv-6.xx.00-amd64.deb` matching your configured `gigamon_version` in `variables.tf`) in the workspace root directory. The deployment script performs a pre-flight check to verify this file exists and will halt with an error if it is missing.
+> Prior to running the deployment script, you **must** place the UCT-V agent Debian package (e.g., `gigamon-gigavue-uctv-6.xx.00-amd64.deb` matching your configured `gigamon_version` in `variables.tf`) in the `UCTV-files` directory. The deployment script performs a pre-flight check to verify this file exists and will halt with an error if it is missing.
 
 You **must** accept the Azure Marketplace terms for the Gigamon images before deploying:
 
