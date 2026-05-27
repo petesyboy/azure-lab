@@ -6,11 +6,7 @@ This repository contains Terraform Infrastructure-as-Code (IaC) and Python autom
 
 ### Mac / Linux
 ```bash
-az login
-python3 -m venv .venv
-source .venv/bin/activate
-pip install requests
-python3 ami-lab-deploy.py
+bash runme.sh
 ```
 
 ### Windows

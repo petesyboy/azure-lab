@@ -43,9 +43,9 @@ output "admin_username" {
   description = "The admin username for SSH access to all VMs"
 }
 
-output "lab_key_file" {
-  value       = local_file.lab_key_pem.filename
-  description = "Path to the local SSH private key file"
+output "lab_key_secret_name" {
+  value       = azurerm_key_vault_secret.lab_key.name
+  description = "Name of the secret in Azure Key Vault containing the SSH private key"
 }
 
 output "uctv_public_ip" {
