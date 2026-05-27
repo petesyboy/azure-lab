@@ -27,66 +27,33 @@ def check_dependencies():
         run_command([sys.executable, "-m", "pip", "install", "requests"])
 
 def check_uctv_deb():
-    """Checks if the required UCT-V agent Debian package exists locally or in blob storage."""
-    print("[*] Checking for UCT-V agent Debian package...")
-    
-    # 1. Check local versions
+    """Checks if the required UCT-V agent Debian package exists in the root directory."""
     deb_files = glob.glob("gigamon-gigavue-uctv-*.deb")
-    local_versions = []
-    for f in deb_files:
-        match = re.search(r'gigamon-gigavue-uctv-(.*?)-amd64\.deb', f)
-        if match:
-            local_versions.append(match.group(1))
-            
-    latest_local = None
-    if local_versions:
-        # Sort versions by interpreting parts as integers
-        local_versions.sort(key=lambda x: [int(p) if p.isdigit() else p for p in x.split('.')])
-        latest_local = local_versions[-1]
-        print(f"[*] Found local UCT-V agent. Latest version: {latest_local}")
-        
-    # 2. Check blob storage
-    blob_versions = []
-    sa_name = None
-    sc_name = None
     
-    try:
-        sa_res = subprocess.run(["terraform", "output", "-raw", "storage_account_name"], capture_output=True, text=True)
-        sc_res = subprocess.run(["terraform", "output", "-raw", "storage_container_name"], capture_output=True, text=True)
-        
-        if sa_res.returncode == 0 and sc_res.returncode == 0:
-            sa_name = sa_res.stdout.strip()
-            sc_name = sc_res.stdout.strip()
+    # Try to parse the default gigamon_version from variables.tf
+    version = "6.13" # Fallback default
+    if os.path.exists("variables.tf"):
+        try:
+            with open("variables.tf", "r") as f:
+                content = f.read()
+                # Look for variable "gigamon_version" default
+                match = re.search(r'variable\s+"gigamon_version"\s+\{[^}]*default\s*=\s*"([^"]+)"', content, re.DOTALL)
+                if match:
+                    version = match.group(1)
+        except Exception:
+            pass
             
-            if sa_name and sc_name and "No outputs" not in sa_name:
-                blob_cmd = [
-                    "az", "storage", "blob", "list", 
-                    "--account-name", sa_name, 
-                    "--container-name", sc_name, 
-                    "--auth-mode", "login", 
-                    "--query", "[].name", "-o", "tsv"
-                ]
-                blob_res = subprocess.run(blob_cmd, capture_output=True, text=True)
-                if blob_res.returncode == 0:
-                    for line in blob_res.stdout.strip().split('\n'):
-                        match = re.search(r'gigamon-gigavue-uctv-(.*?)-amd64\.deb', line)
-                        if match:
-                            blob_versions.append(match.group(1))
-    except Exception as e:
-        print(f"[*] Could not check blob storage: {e}")
-
-    latest_blob = None
-    if blob_versions:
-        blob_versions.sort(key=lambda x: [int(p) if p.isdigit() else p for p in x.split('.')])
-        latest_blob = blob_versions[-1]
-        print(f"[*] Found UCT-V agent in Blob Storage. Latest version: {latest_blob}")
-
-    # 3. Handle existence logic
-    if not latest_local and not latest_blob:
+    expected_file = f"gigamon-gigavue-uctv-{version}.00-amd64.deb"
+    
+    if not os.path.exists(expected_file):
         print("\n" + "!"*80)
-        print("[!] ERROR: Required UCT-V agent Debian package not found in current directory OR Blob Storage!")
-        print("    Please login to https://community.gigamon.com to download the required file.")
-        print("    Place the .deb file in the workspace root directory before deploying.")
+        print(f"[!] ERROR: Required UCT-V agent Debian package not found in root directory!")
+        print(f"    Expected file: {expected_file}")
+        if deb_files:
+            print(f"    Found other .deb file(s) in directory: {', '.join(deb_files)}")
+            print(f"    Please update the 'gigamon_version' in 'variables.tf' to match your file.")
+        else:
+            print("    Please ensure the UCT-V agent deb package is placed in the workspace root.")
         print("!"*80 + "\n")
         sys.exit(1)
         
