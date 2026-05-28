@@ -87,6 +87,30 @@ def fetch_and_fix_ssh_key():
         print(f"[!] Warning: Failed to download SSH key from Key Vault: {e}")
 
     if os.path.exists(key_file):
+        # Normalise line endings: az keyvault secret download on Windows can write
+        # CRLF (\r\n), which corrupts PEM boundaries and causes SSH to report
+        # "identity file type -1 / no identity pubkey loaded".
+        # Read binary, strip all \r bytes, write back — safe on all platforms.
+        print(f"[*] Normalising line endings in {key_file}...")
+        try:
+            # Ensure we can write to the file first (it may already be read-only
+            # if this is a re-run after a previous Terraform apply wrote it)
+            if os.name == 'nt':
+                subprocess.run(["icacls", key_file, "/grant:r", f"{os.environ.get('USERNAME', 'User')}:F"],
+                               capture_output=True)
+            elif os.name == 'posix':
+                os.chmod(key_file, 0o600)
+
+            with open(key_file, "rb") as f:
+                raw = f.read()
+            normalised = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            with open(key_file, "wb") as f:
+                f.write(normalised)
+            print(f"[*] Line endings normalised.")
+        except Exception as e:
+            print(f"[!] Warning: Could not normalise line endings in {key_file}: {e}")
+
+    if os.path.exists(key_file):
         print(f"[*] Ensuring correct permissions for {key_file}...")
         try:
             if os.name == 'posix':

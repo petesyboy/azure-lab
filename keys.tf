@@ -10,7 +10,12 @@ resource "tls_private_key" "lab_key" {
 
 resource "azurerm_key_vault_secret" "lab_key" {
   name         = "lab-ssh-private-key"
-  value        = tls_private_key.lab_key.private_key_openssh
+  # Store PEM/PKCS#1 format ("BEGIN RSA PRIVATE KEY") so that the az keyvault
+  # secret download in the deployment script produces a file that SSH can parse.
+  # OpenSSH format ("BEGIN OPENSSH PRIVATE KEY") downloaded on Windows via az CLI
+  # results in "identity file type -1" because az writes CRLF line endings which
+  # corrupt the key boundaries.
+  value        = tls_private_key.lab_key.private_key_pem
   key_vault_id = azurerm_key_vault.fm_token_kv.id
 
   depends_on = [
