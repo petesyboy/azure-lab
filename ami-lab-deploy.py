@@ -192,10 +192,23 @@ def main():
     
     # 4. Plan Terraform deployment
     run_command(["terraform", "plan", "-out=tfplan"])
-    
+
     # 5. Apply Terraform deployment
+    # On Windows, lab_key.pem may be locked to read-only from a previous run's
+    # icacls lockdown.  Terraform's local_sensitive_file resource will fail with
+    # "Access is denied" if it cannot overwrite the file.  Unlock it here so
+    # Terraform can write the fresh key; fetch_and_fix_ssh_key() re-applies the
+    # correct permissions after the apply completes.
+    if os.name == 'nt':
+        import getpass as _gp
+        _key = "lab_key.pem"
+        if os.path.exists(_key):
+            print(f"[*] Pre-apply: unlocking {_key} so Terraform can overwrite it...")
+            _win_unlock_key(_key, _gp.getuser())
+
     print("\n[*] Applying Terraform configuration...")
     run_command(["terraform", "apply", "tfplan"])
+
     
     # 6. Run the generated configuration script
     config_script = os.path.join("scripts", "configure_lab.py")
