@@ -88,15 +88,15 @@ def fetch_and_fix_ssh_key():
 
     if os.path.exists(key_file):
         # Normalise line endings: az keyvault secret download on Windows can write
-        # CRLF (\r\n), which corrupts PEM boundaries and causes SSH to report
-        # "identity file type -1 / no identity pubkey loaded".
+        # CRLF (\r\n) which corrupts both OpenSSH and PEM key boundaries.
         # Read binary, strip all \r bytes, write back — safe on all platforms.
         print(f"[*] Normalising line endings in {key_file}...")
         try:
-            # Ensure we can write to the file first (it may already be read-only
-            # if this is a re-run after a previous Terraform apply wrote it)
+            # Ensure the file is writable before we touch it (may be read-only
+            # from a previous Terraform apply or a prior run of this script).
             if os.name == 'nt':
-                subprocess.run(["icacls", key_file, "/grant:r", f"{os.environ.get('USERNAME', 'User')}:F"],
+                subprocess.run(["icacls", key_file, "/grant:r",
+                                f"{os.environ.get('USERNAME', 'User')}:F"],
                                capture_output=True)
             elif os.name == 'posix':
                 os.chmod(key_file, 0o600)
@@ -109,6 +109,32 @@ def fetch_and_fix_ssh_key():
             print(f"[*] Line endings normalised.")
         except Exception as e:
             print(f"[!] Warning: Could not normalise line endings in {key_file}: {e}")
+
+    if os.path.exists(key_file) and os.name == 'nt':
+        # Windows OpenSSH (especially older builds) cannot load keys stored in
+        # the modern OpenSSH wire format ("BEGIN OPENSSH PRIVATE KEY").  Convert
+        # to classic RSA/PEM format ("BEGIN RSA PRIVATE KEY") using ssh-keygen,
+        # which ships with the Windows OpenSSH Feature (Win10 1809+).
+        # The conversion is done in-place; -P "" and -N "" mean the key is
+        # unencrypted before and after the conversion.
+        print(f"[*] Converting key to RSA PEM format for Windows SSH compatibility...")
+        try:
+            result = subprocess.run(
+                ["ssh-keygen", "-p", "-m", "pem", "-f", key_file, "-P", "", "-N", ""],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                print(f"[*] Key converted to RSA PEM format successfully.")
+            else:
+                # Non-fatal: the key may already be in PEM format, or ssh-keygen
+                # may not be on PATH.  SSH will fail later with a clearer error.
+                print(f"[!] Warning: ssh-keygen conversion returned code {result.returncode}.")
+                if result.stderr:
+                    print(f"    {result.stderr.strip()}")
+        except FileNotFoundError:
+            print(f"[!] Warning: ssh-keygen not found. Ensure the Windows OpenSSH Feature is installed.")
+        except Exception as e:
+            print(f"[!] Warning: Could not convert key format: {e}")
 
     if os.path.exists(key_file):
         print(f"[*] Ensuring correct permissions for {key_file}...")
