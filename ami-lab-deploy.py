@@ -58,26 +58,44 @@ def check_uctv_deb():
         print("!"*80 + "\n")
         sys.exit(1)
 
-def _win_unlock_key(key_file, user):
+def _win_current_user():
     """
-    Strips all inherited / group ACEs and grants the current user Full Control.
-    Must be called before any write operation (normalise, ssh-keygen conversion).
-    ssh-keygen itself checks permissions before processing and rejects files that
-    are readable by groups such as NT AUTHORITY\\Authenticated Users.
+    Returns the Windows-qualified username that icacls expects (DOMAIN\\user or
+    COMPUTERNAME\\user).  getpass.getuser() only returns the bare username which
+    is NOT recognised by icacls on domain-joined or Microsoft Account machines.
     """
-    subprocess.run(["icacls", key_file, "/inheritance:r"],                             capture_output=True)  # remove inherited ACEs
-    subprocess.run(["icacls", key_file, "/remove", "Everyone"],                        capture_output=True)  # strip Everyone
-    subprocess.run(["icacls", key_file, "/remove", "BUILTIN\\Users"],                  capture_output=True)  # strip Users group
-    subprocess.run(["icacls", key_file, "/remove", "NT AUTHORITY\\Authenticated Users"], capture_output=True)  # strip Auth Users
-    subprocess.run(["icacls", key_file, "/grant:r", f"{user}:F"],                      capture_output=True)  # owner: Full Control
+    res = subprocess.run(["whoami"], capture_output=True, text=True)
+    return res.stdout.strip() if res.returncode == 0 else ""
 
-def _win_lockdown_key(key_file, user):
+def _win_unlock_key(key_file, _unused_user=None):
+    """
+    Strips all inherited/group ACEs and grants the current user Full Control.
+    Must be called before any write operation (normalise, ssh-keygen conversion).
+    ssh-keygen checks permissions before processing and rejects files that are
+    readable by groups such as NT AUTHORITY\\Authenticated Users.
+    """
+    user = _win_current_user()
+    subprocess.run(["takeown",  "/f", key_file],                                           capture_output=True)  # ensure ownership so we can modify ACL
+    subprocess.run(["icacls",   key_file, "/inheritance:r"],                               capture_output=True)  # remove inherited ACEs
+    subprocess.run(["icacls",   key_file, "/remove", "Everyone"],                          capture_output=True)  # strip Everyone
+    subprocess.run(["icacls",   key_file, "/remove", "BUILTIN\\Users"],                    capture_output=True)  # strip Users group
+    subprocess.run(["icacls",   key_file, "/remove", "NT AUTHORITY\\Authenticated Users"], capture_output=True)  # strip Auth Users
+    if user:
+        subprocess.run(["icacls", key_file, "/grant:r", f"{user}:F"],                     capture_output=True)  # owner: Full Control
+    subprocess.run(["attrib", "-R", key_file],                                             capture_output=True)  # clear read-only file attribute
+
+def _win_lockdown_key(key_file, _unused_user=None):
     """Downgrades owner access to Read-only so SSH accepts the key file."""
-    subprocess.run(["icacls", key_file, "/grant:r", f"{user}:R"], capture_output=True)
+    user = _win_current_user()
+    if user:
+        subprocess.run(["icacls", key_file, "/grant:r", f"{user}:R"], capture_output=True)
+    subprocess.run(["attrib", "+R", key_file], capture_output=True)  # set read-only file attribute
+
+
 
 def fetch_and_fix_ssh_key():
     """Downloads the SSH private key from Key Vault and ensures correct file permissions."""
-    import getpass, shutil as _shutil
+    import shutil as _shutil
 
     key_file = "lab_key.pem"
     print(f"[*] Fetching SSH private key from Azure Key Vault...")
@@ -99,7 +117,7 @@ def fetch_and_fix_ssh_key():
                     if os.name == 'posix':
                         os.chmod(key_file, 0o600)
                     elif os.name == 'nt':
-                        _win_unlock_key(key_file, getpass.getuser())
+                        _win_unlock_key(key_file)
 
                 az_cmd = _shutil.which("az") or ("az.cmd" if os.name == 'nt' else "az")
                 dl_cmd = [
@@ -124,7 +142,7 @@ def fetch_and_fix_ssh_key():
         if os.name == 'posix':
             os.chmod(key_file, 0o600)
         elif os.name == 'nt':
-            _win_unlock_key(key_file, getpass.getuser())
+            _win_unlock_key(key_file)
     except Exception as e:
         print(f"[!] Warning: Could not unlock {key_file}: {e}")
 
@@ -172,7 +190,7 @@ def fetch_and_fix_ssh_key():
         elif os.name == 'nt':
             # Downgrade from Full Control to Read-only.  All group ACEs were
             # already stripped in Step 2, so only the owner retains access.
-            _win_lockdown_key(key_file, getpass.getuser())
+            _win_lockdown_key(key_file)
     except Exception as e:
         print(f"[!] Warning: Could not lock down permissions on {key_file}: {e}")
 
@@ -200,11 +218,10 @@ def main():
     # Terraform can write the fresh key; fetch_and_fix_ssh_key() re-applies the
     # correct permissions after the apply completes.
     if os.name == 'nt':
-        import getpass as _gp
         _key = "lab_key.pem"
         if os.path.exists(_key):
             print(f"[*] Pre-apply: unlocking {_key} so Terraform can overwrite it...")
-            _win_unlock_key(_key, _gp.getuser())
+            _win_unlock_key(_key)
 
     print("\n[*] Applying Terraform configuration...")
     run_command(["terraform", "apply", "tfplan"])
