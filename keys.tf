@@ -1,10 +1,11 @@
 ############################################################
 # SSH Key Generation
 ############################################################
-# This file generates an ED25519 private key and saves it locally.
+# This file generates an RSA private key and saves it locally.
 
 resource "tls_private_key" "lab_key" {
-  algorithm = "ED25519"
+  algorithm = "RSA"
+  rsa_bits  = 4096
 }
 
 resource "azurerm_key_vault_secret" "lab_key" {
