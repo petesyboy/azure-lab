@@ -1,0 +1,49 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Azure Lab 6.1x - Gigamon V Series Deployment Wrapper (PowerShell)
+.DESCRIPTION
+    PowerShell equivalent of runme.bat / runme.sh.
+    Checks Azure CLI login state, creates a Python venv, installs
+    dependencies, and launches the main deployment script.
+#>
+
+$ErrorActionPreference = 'Stop'
+
+# ── Azure CLI login check ────────────────────────────────────────────────────
+Write-Host "Checking Azure CLI login status..."
+$azStatus = az account show 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Not logged in to Azure. Running 'az login'..."
+    az login
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Azure login failed. Aborting."
+        exit 1
+    }
+} else {
+    Write-Host "Already logged in to Azure."
+}
+
+# ── Python virtual environment ───────────────────────────────────────────────
+Write-Host "Creating Python virtual environment..."
+python -m venv .venv
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Failed to create virtual environment. Is Python installed?"
+    exit 1
+}
+
+# Activate — PowerShell uses a different activate script to cmd/bash
+& ".\.venv\Scripts\Activate.ps1"
+
+# ── Install dependencies ─────────────────────────────────────────────────────
+Write-Host "Installing Python dependencies..."
+pip install requests
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "pip install failed."
+    exit 1
+}
+
+# ── Launch deployment ────────────────────────────────────────────────────────
+Write-Host "Launching deployment..."
+python ami-lab-deploy.py
+exit $LASTEXITCODE
