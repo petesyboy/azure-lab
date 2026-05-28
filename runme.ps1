@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 
 # ── Azure CLI login check ────────────────────────────────────────────────────
 Write-Host "Checking Azure CLI login status..."
-$azStatus = az account show 2>&1
+$azStatus = az account show 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Not logged in to Azure. Running 'az login'..."
     az login
@@ -40,7 +40,7 @@ else {
 }
 
 # Activate — PowerShell uses a different activate script to cmd/bash
-& ".\.venv\Scripts\Activate.ps1"
+. ".\.venv\Scripts\Activate.ps1"
 
 # ── Install dependencies ─────────────────────────────────────────────────────
 Write-Host "Installing Python dependencies..."
