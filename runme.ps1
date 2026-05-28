@@ -20,7 +20,8 @@ if ($LASTEXITCODE -ne 0) {
         Write-Error "Azure login failed. Aborting."
         exit 1
     }
-} else {
+}
+else {
     Write-Host "Already logged in to Azure."
 }
 
@@ -28,7 +29,8 @@ if ($LASTEXITCODE -ne 0) {
 $venvPython = ".venv\Scripts\python.exe"
 if (Test-Path $venvPython) {
     Write-Host "Virtual environment already exists — skipping creation."
-} else {
+}
+else {
     Write-Host "Creating Python virtual environment..."
     python -m venv .venv
     if ($LASTEXITCODE -ne 0) {
