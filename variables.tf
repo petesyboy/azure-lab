@@ -41,10 +41,6 @@ variable "gigamon_email" {
 # FM Configuration & Credentials
 # -----------------------------------------------------------------------------
 
-# -----------------------------------------------------------------------------
-# FM Configuration & Credentials
-# -----------------------------------------------------------------------------
-
 variable "fm_group_name" {
   type        = string
   description = "Monitoring Domain (Group) name to create on FM."
@@ -140,4 +136,3 @@ variable "allowed_mgmt_ip" {
   description = "The IP address or CIDR range allowed for management access (SSH, HTTPS, HTTP, ntopng UI). If set to 'dynamic' (default), it will fetch the deployer's public IP dynamically using https://ipv4.icanhazip.com."
   default     = "dynamic"
 }
-

@@ -38,7 +38,7 @@ az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-s
 - **Networking**: Single VNet with two subnets (Visibility and Production).
 - **Gigamon Fabric**: GigaVUE-FM (Management), UCT-V Controller (Tap Management), vSeries & AMX Nodes (Traffic Processing).
 - **Workloads**: 
-  - **Tool VM & Cribl VM**: Sinks for mirrored traffic and AMX metadata (Visibility Subnet).
+  - **Tool VM**: Sink for mirrored traffic and AMX metadata (Visibility Subnet).
   - **Production VMs**: Ubuntu workloads for traffic generation (Production Subnet).
 
 ## Post-Deployment Configuration (CRITICAL)
@@ -67,11 +67,11 @@ az keyvault secret set --vault-name $KV_NAME --name $SECRET_NAME --value "<PASTE
 ## Create the Monitoring Session.
 
 1. Login to GigaVUE-FM.
-2. Click on **Monitor ** in the left pane.
+2. Click on **Monitor** in the left pane.
 3. Click on **Monitoring Session**.
 4. Click on **New Session**.
-5. Add in the map and tunnel (the IP address of the NtopNG VM and port 4789) as the tunnel endpoint.
-5. Click on **Save**.
+5. Add in the map and tunnel (use the IP address of the Tool VM and port 4789) as the tunnel endpoint.
+6. Click on **Save**.
 
 ## Usage & Verification
 

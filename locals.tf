@@ -114,13 +114,31 @@ locals {
     LOG="/var/log/gigamon-bootstrap.log"
     exec > >(tee -a "$LOG") 2>&1
 
+    echo "[$(date)] Fetching Managed Identity Token for Azure Storage..."
+    MSI_JSON="$(curl -sS -H 'Metadata: true' 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fstorage.azure.com%2F' || true)"
+    STORAGE_TOKEN=""
+    if command -v jq >/dev/null 2>&1; then
+      STORAGE_TOKEN="$(echo "$MSI_JSON" | jq -r '.access_token // empty' || true)"
+    elif command -v python3 >/dev/null 2>&1; then
+      STORAGE_TOKEN="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' <<<"$MSI_JSON")"
+    else
+      STORAGE_TOKEN="$(echo "$MSI_JSON" | sed -n 's/.*"access_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    fi
+
     echo "[$(date)] Downloading UCT-V agent..."
     sleep 20
-    AGENT_URL="${azurerm_storage_account.lab_sa.primary_blob_endpoint}${azurerm_storage_container.uctv_container.name}/gigamon-gigavue-uctv-${local.uctv_image_version}-amd64.deb"
+    AGENT_URL="${azurerm_storage_account.lab_sa.primary_blob_endpoint}${azurerm_storage_container.uctv_container.name}/UCTV-files/gigamon-gigavue-uctv-${local.uctv_image_version}-amd64.deb"
     for i in {1..30}; do
-      if curl -fSL --retry 5 "$${AGENT_URL}" -o /tmp/uctv-agent.deb; then
-        echo "Download successful."
-        break
+      if [[ -n "$STORAGE_TOKEN" ]]; then
+        if curl -fSL --retry 5 -H "Authorization: Bearer $STORAGE_TOKEN" -H "x-ms-version: 2021-08-06" "$${AGENT_URL}" -o /tmp/uctv-agent.deb; then
+          echo "Download successful using Managed Identity."
+          break
+        fi
+      else
+        if curl -fSL --retry 5 "$${AGENT_URL}" -o /tmp/uctv-agent.deb; then
+          echo "Download successful."
+          break
+        fi
       fi
       sleep 10
     done

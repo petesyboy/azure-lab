@@ -27,8 +27,9 @@ def check_dependencies():
         run_command([sys.executable, "-m", "pip", "install", "requests"])
 
 def check_uctv_deb():
-    """Checks if the required UCT-V agent Debian package exists in the root directory."""
-    deb_files = glob.glob("gigamon-gigavue-uctv-*.deb")
+    """Checks if the required UCT-V agent Debian package exists in the UCTV-files directory."""
+    deb_dir = "UCTV-files"
+    deb_files = glob.glob(os.path.join(deb_dir, "gigamon-gigavue-uctv-*.deb"))
     
     # Try to parse the default gigamon_version from variables.tf
     version = "6.13" # Fallback default
@@ -43,74 +44,19 @@ def check_uctv_deb():
         except Exception:
             pass
             
-    expected_file = f"gigamon-gigavue-uctv-{version}.00-amd64.deb"
+    expected_file = os.path.join(deb_dir, f"gigamon-gigavue-uctv-{version}.00-amd64.deb")
     
     if not os.path.exists(expected_file):
         print("\n" + "!"*80)
-        print(f"[!] ERROR: Required UCT-V agent Debian package not found in root directory!")
+        print(f"[!] ERROR: Required UCT-V agent Debian package not found in the {deb_dir} directory!")
         print(f"    Expected file: {expected_file}")
         if deb_files:
             print(f"    Found other .deb file(s) in directory: {', '.join(deb_files)}")
             print(f"    Please update the 'gigamon_version' in 'variables.tf' to match your file.")
         else:
-            print("    Please ensure the UCT-V agent deb package is placed in the workspace root.")
+            print(f"    Please ensure the UCT-V agent deb package is placed in the {deb_dir} directory.")
         print("!"*80 + "\n")
         sys.exit(1)
-        
-    # Determine the latest version between local and blob
-    chosen_version = latest_local
-    if latest_local and latest_blob:
-        local_parts = [int(p) if p.isdigit() else p for p in latest_local.split('.')]
-        blob_parts = [int(p) if p.isdigit() else p for p in latest_blob.split('.')]
-        if local_parts > blob_parts:
-            print(f"[*] Local version ({latest_local}) is newer than blob storage version ({latest_blob}). Will use local.")
-            chosen_version = latest_local
-        else:
-            print(f"[*] Blob storage version ({latest_blob}) is greater than or equal to local version ({latest_local}).")
-            chosen_version = latest_blob
-    elif latest_blob:
-        chosen_version = latest_blob
-
-    # Download from blob if chosen_version is from blob and doesn't exist locally
-    chosen_filename = f"gigamon-gigavue-uctv-{chosen_version}-amd64.deb"
-    if not os.path.exists(chosen_filename) and chosen_version == latest_blob:
-        print(f"[*] Required version {chosen_version} is missing locally. Downloading from Blob Storage for Terraform...")
-        dl_cmd = [
-            "az", "storage", "blob", "download",
-            "--account-name", sa_name,
-            "--container-name", sc_name,
-            "--name", chosen_filename,
-            "--file", chosen_filename,
-            "--auth-mode", "login"
-        ]
-        res = subprocess.run(dl_cmd)
-        if res.returncode != 0:
-            print(f"[!] Warning: Failed to download {chosen_filename} from Blob Storage.")
-
-    # 4. Update variables.tf to use the chosen version
-    if chosen_version:
-        parts = chosen_version.split('.')
-        if len(parts) >= 2:
-            # e.g., '6.13.00' -> '6.13'
-            tf_version = f"{parts[0]}.{parts[1]}"
-            print(f"[*] Ensuring target gigamon_version in variables.tf is {tf_version}...")
-            if os.path.exists("variables.tf"):
-                try:
-                    with open("variables.tf", "r") as f:
-                        content = f.read()
-                    
-                    new_content = re.sub(
-                        r'(variable\s+"gigamon_version"\s+\{[\s\S]*?default\s*=\s*")[^"]+(")',
-                        rf'\g<1>{tf_version}\g<2>',
-                        content
-                    )
-                    
-                    if new_content != content:
-                        with open("variables.tf", "w") as f:
-                            f.write(new_content)
-                        print(f"[*] Updated variables.tf to use version {tf_version}.")
-                except Exception as e:
-                    print(f"[!] Warning: Could not update variables.tf automatically: {e}")
 
 def fetch_and_fix_ssh_key():
     """Downloads the SSH private key from Key Vault and ensures correct file permissions."""
@@ -125,6 +71,10 @@ def fetch_and_fix_ssh_key():
             kv_name = kv_res.stdout.strip()
             sec_name = sec_res.stdout.strip()
             if kv_name and sec_name and "No outputs" not in kv_name:
+                # If the file already exists and is read-only, make it writable first
+                if os.path.exists(key_file) and os.name == 'posix':
+                    os.chmod(key_file, 0o600)
+                    
                 dl_cmd = [
                     "az", "keyvault", "secret", "download",
                     "--vault-name", kv_name,
@@ -139,7 +89,7 @@ def fetch_and_fix_ssh_key():
         print(f"[*] Ensuring correct permissions for {key_file}...")
         try:
             if os.name == 'posix':
-                os.chmod(key_file, 0o600)
+                os.chmod(key_file, 0o400)
             elif os.name == 'nt':
                 # Lock down file using Windows icacls
                 subprocess.run(["icacls", key_file, "/inheritance:r"], capture_output=True)
@@ -163,14 +113,14 @@ def main():
     # 3. Check UCT-V Debian package existence (moved after init to check blob storage)
     check_uctv_deb()
     
-    # 3. Plan Terraform deployment
+    # 4. Plan Terraform deployment
     run_command(["terraform", "plan", "-out=tfplan"])
     
-    # 4. Apply Terraform deployment
+    # 5. Apply Terraform deployment
     print("\n[*] Applying Terraform configuration...")
     run_command(["terraform", "apply", "tfplan"])
     
-    # 5. Run the generated configuration script
+    # 6. Run the generated configuration script
     config_script = os.path.join("scripts", "configure_lab.py")
     if os.path.exists(config_script):
         # Download SSH key from KV and fix permissions before attempting connection

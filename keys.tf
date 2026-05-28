@@ -17,3 +17,9 @@ resource "azurerm_key_vault_secret" "lab_key" {
     azurerm_role_assignment.kv_secrets_officer_current_user
   ]
 }
+
+resource "local_sensitive_file" "lab_key_pem" {
+  content         = tls_private_key.lab_key.private_key_pem
+  filename        = "${path.module}/lab_key.pem"
+  file_permission = "0400"
+}

@@ -164,11 +164,11 @@ resource "azurerm_storage_account" "lab_sa" {
 resource "azurerm_storage_container" "uctv_container" {
   name                  = "uctv-container"
   storage_account_name  = azurerm_storage_account.lab_sa.name
-  container_access_type = "blob" # Public read access for blobs so VMs can curl without SAS
+  container_access_type = "private" # Private access, VMs will use Managed Identity to download
 }
 
 resource "azurerm_storage_blob" "uctv_agent_package" {
-  name                   = "gigamon-gigavue-uctv-${var.gigamon_version}.00-amd64.deb"
+  name                   = "UCTV-files/gigamon-gigavue-uctv-${var.gigamon_version}.00-amd64.deb"
   storage_account_name   = azurerm_storage_account.lab_sa.name
   storage_container_name = azurerm_storage_container.uctv_container.name
   type                   = "Block"
@@ -177,7 +177,7 @@ resource "azurerm_storage_blob" "uctv_agent_package" {
   # Wait for storage container to exist and permissions to propagate
   depends_on = [
     azurerm_storage_container.uctv_container,
-    azurerm_role_assignment.storage_blob_data_contributor_current_user
+    time_sleep.wait_for_storage_rbac
   ]
 }
 
@@ -186,6 +186,11 @@ resource "azurerm_role_assignment" "storage_blob_data_contributor_current_user" 
   scope                = azurerm_storage_account.lab_sa.id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = data.azurerm_client_config.current.object_id
+}
+
+resource "time_sleep" "wait_for_storage_rbac" {
+  create_duration = "60s"
+  depends_on      = [azurerm_role_assignment.storage_blob_data_contributor_current_user]
 }
 
 ############################################################
@@ -466,6 +471,17 @@ resource "azurerm_role_assignment" "kv_secrets_users" {
 
   scope                = azurerm_key_vault.fm_token_kv.id
   role_definition_name = "Key Vault Secrets User"
+  principal_id         = each.value
+}
+
+resource "azurerm_role_assignment" "storage_blob_readers" {
+  for_each = {
+    prod1 = module.prod1.principal_id
+    prod2 = module.prod2.principal_id
+  }
+
+  scope                = azurerm_storage_account.lab_sa.id
+  role_definition_name = "Storage Blob Data Reader"
   principal_id         = each.value
 }
 
