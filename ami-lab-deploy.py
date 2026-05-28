@@ -58,65 +58,95 @@ def check_uctv_deb():
         print("!"*80 + "\n")
         sys.exit(1)
 
+def _win_unlock_key(key_file, user):
+    """
+    Strips all inherited / group ACEs and grants the current user Full Control.
+    Must be called before any write operation (normalise, ssh-keygen conversion).
+    ssh-keygen itself checks permissions before processing and rejects files that
+    are readable by groups such as NT AUTHORITY\\Authenticated Users.
+    """
+    subprocess.run(["icacls", key_file, "/inheritance:r"],                             capture_output=True)  # remove inherited ACEs
+    subprocess.run(["icacls", key_file, "/remove", "Everyone"],                        capture_output=True)  # strip Everyone
+    subprocess.run(["icacls", key_file, "/remove", "BUILTIN\\Users"],                  capture_output=True)  # strip Users group
+    subprocess.run(["icacls", key_file, "/remove", "NT AUTHORITY\\Authenticated Users"], capture_output=True)  # strip Auth Users
+    subprocess.run(["icacls", key_file, "/grant:r", f"{user}:F"],                      capture_output=True)  # owner: Full Control
+
+def _win_lockdown_key(key_file, user):
+    """Downgrades owner access to Read-only so SSH accepts the key file."""
+    subprocess.run(["icacls", key_file, "/grant:r", f"{user}:R"], capture_output=True)
+
 def fetch_and_fix_ssh_key():
     """Downloads the SSH private key from Key Vault and ensures correct file permissions."""
+    import getpass, shutil as _shutil
+
     key_file = "lab_key.pem"
     print(f"[*] Fetching SSH private key from Azure Key Vault...")
-    
+
+    # ── Step 1: Download from Key Vault ──────────────────────────────────────
+    # On Windows, 'az' is a .cmd batch wrapper that subprocess cannot invoke
+    # directly — use shutil.which() to resolve the full path (same pattern as
+    # configure_lab.py) and run with shell=True on Windows.
     try:
-        kv_res = subprocess.run(["terraform", "output", "-raw", "key_vault_name"], capture_output=True, text=True)
+        kv_res  = subprocess.run(["terraform", "output", "-raw", "key_vault_name"],    capture_output=True, text=True)
         sec_res = subprocess.run(["terraform", "output", "-raw", "lab_key_secret_name"], capture_output=True, text=True)
-        
+
         if kv_res.returncode == 0 and sec_res.returncode == 0:
-            kv_name = kv_res.stdout.strip()
+            kv_name  = kv_res.stdout.strip()
             sec_name = sec_res.stdout.strip()
             if kv_name and sec_name and "No outputs" not in kv_name:
-                # If the file already exists and is read-only, make it writable first
-                if os.path.exists(key_file) and os.name == 'posix':
-                    os.chmod(key_file, 0o600)
-                    
+                # Make existing file writable before overwriting
+                if os.path.exists(key_file):
+                    if os.name == 'posix':
+                        os.chmod(key_file, 0o600)
+                    elif os.name == 'nt':
+                        _win_unlock_key(key_file, getpass.getuser())
+
+                az_cmd = _shutil.which("az") or ("az.cmd" if os.name == 'nt' else "az")
                 dl_cmd = [
-                    "az", "keyvault", "secret", "download",
+                    az_cmd, "keyvault", "secret", "download",
                     "--vault-name", kv_name,
-                    "--name", sec_name,
-                    "--file", key_file,
-                    "--encoding", "ascii"  # Prevent BOM/CRLF corruption on Windows
+                    "--name",       sec_name,
+                    "--file",       key_file,
+                    "--encoding",   "ascii",   # prevent BOM/CRLF on Windows
                 ]
-                subprocess.run(dl_cmd)
+                # .cmd files require the Windows shell to execute
+                subprocess.run(dl_cmd, shell=(os.name == 'nt'))
     except Exception as e:
         print(f"[!] Warning: Failed to download SSH key from Key Vault: {e}")
 
-    if os.path.exists(key_file):
-        # Normalise line endings: az keyvault secret download on Windows can write
-        # CRLF (\r\n) which corrupts both OpenSSH and PEM key boundaries.
-        # Read binary, strip all \r bytes, write back — safe on all platforms.
-        print(f"[*] Normalising line endings in {key_file}...")
-        try:
-            # Ensure the file is writable before we touch it (may be read-only
-            # from a previous Terraform apply or a prior run of this script).
-            if os.name == 'nt':
-                subprocess.run(["icacls", key_file, "/grant:r",
-                                f"{os.environ.get('USERNAME', 'User')}:F"],
-                               capture_output=True)
-            elif os.name == 'posix':
-                os.chmod(key_file, 0o600)
+    if not os.path.exists(key_file):
+        print(f"[!] Warning: {key_file} not found — skipping key fixup.")
+        return
 
-            with open(key_file, "rb") as f:
-                raw = f.read()
-            normalised = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-            with open(key_file, "wb") as f:
-                f.write(normalised)
-            print(f"[*] Line endings normalised.")
-        except Exception as e:
-            print(f"[!] Warning: Could not normalise line endings in {key_file}: {e}")
+    # ── Step 2: Unlock file for all subsequent write operations ──────────────
+    print(f"[*] Unlocking {key_file} for processing...")
+    try:
+        if os.name == 'posix':
+            os.chmod(key_file, 0o600)
+        elif os.name == 'nt':
+            _win_unlock_key(key_file, getpass.getuser())
+    except Exception as e:
+        print(f"[!] Warning: Could not unlock {key_file}: {e}")
 
-    if os.path.exists(key_file) and os.name == 'nt':
-        # Windows OpenSSH (especially older builds) cannot load keys stored in
-        # the modern OpenSSH wire format ("BEGIN OPENSSH PRIVATE KEY").  Convert
-        # to classic RSA/PEM format ("BEGIN RSA PRIVATE KEY") using ssh-keygen,
-        # which ships with the Windows OpenSSH Feature (Win10 1809+).
-        # The conversion is done in-place; -P "" and -N "" mean the key is
-        # unencrypted before and after the conversion.
+    # ── Step 3: Normalise line endings (CRLF → LF) ───────────────────────────
+    # az keyvault secret download on Windows can write CRLF which corrupts
+    # both OpenSSH and PEM key boundaries.
+    print(f"[*] Normalising line endings in {key_file}...")
+    try:
+        with open(key_file, "rb") as f:
+            raw = f.read()
+        normalised = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        with open(key_file, "wb") as f:
+            f.write(normalised)
+        print(f"[*] Line endings normalised.")
+    except Exception as e:
+        print(f"[!] Warning: Could not normalise line endings in {key_file}: {e}")
+
+    # ── Step 4: Windows-only — convert OpenSSH format → RSA PEM ─────────────
+    # Windows OpenSSH cannot reliably load "BEGIN OPENSSH PRIVATE KEY" files.
+    # ssh-keygen -p -m pem converts in-place.  It requires the file to be
+    # accessible only by the owner (guaranteed by _win_unlock_key above).
+    if os.name == 'nt':
         print(f"[*] Converting key to RSA PEM format for Windows SSH compatibility...")
         try:
             result = subprocess.run(
@@ -126,8 +156,6 @@ def fetch_and_fix_ssh_key():
             if result.returncode == 0:
                 print(f"[*] Key converted to RSA PEM format successfully.")
             else:
-                # Non-fatal: the key may already be in PEM format, or ssh-keygen
-                # may not be on PATH.  SSH will fail later with a clearer error.
                 print(f"[!] Warning: ssh-keygen conversion returned code {result.returncode}.")
                 if result.stderr:
                     print(f"    {result.stderr.strip()}")
@@ -136,23 +164,17 @@ def fetch_and_fix_ssh_key():
         except Exception as e:
             print(f"[!] Warning: Could not convert key format: {e}")
 
-    if os.path.exists(key_file):
-        print(f"[*] Ensuring correct permissions for {key_file}...")
-        try:
-            if os.name == 'posix':
-                os.chmod(key_file, 0o400)
-            elif os.name == 'nt':
-                # Lock down file using Windows icacls so SSH doesn't reject it.
-                # SSH on Windows refuses keys that are readable by anyone other
-                # than the owner (equivalent of chmod 400 on Linux).
-                import getpass
-                user = getpass.getuser()
-                subprocess.run(["icacls", key_file, "/inheritance:r"], capture_output=True)         # Remove inherited ACEs
-                subprocess.run(["icacls", key_file, "/remove", "Everyone"], capture_output=True)    # Deny Everyone
-                subprocess.run(["icacls", key_file, "/remove", "BUILTIN\\Users"], capture_output=True)  # Deny Users group
-                subprocess.run(["icacls", key_file, "/grant:r", f"{user}:R"], capture_output=True)  # Grant owner Read-only
-        except Exception as e:
-            print(f"[!] Warning: Could not adjust permissions on {key_file}: {e}")
+    # ── Step 5: Final permission lock-down ───────────────────────────────────
+    print(f"[*] Locking down permissions for {key_file}...")
+    try:
+        if os.name == 'posix':
+            os.chmod(key_file, 0o400)
+        elif os.name == 'nt':
+            # Downgrade from Full Control to Read-only.  All group ACEs were
+            # already stripped in Step 2, so only the owner retains access.
+            _win_lockdown_key(key_file, getpass.getuser())
+    except Exception as e:
+        print(f"[!] Warning: Could not lock down permissions on {key_file}: {e}")
 
 def main():
     print("======================================================")
