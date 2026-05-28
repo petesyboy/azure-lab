@@ -25,11 +25,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ── Python virtual environment ───────────────────────────────────────────────
-Write-Host "Creating Python virtual environment..."
-python -m venv .venv
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to create virtual environment. Is Python installed?"
-    exit 1
+$venvPython = ".venv\Scripts\python.exe"
+if (Test-Path $venvPython) {
+    Write-Host "Virtual environment already exists — skipping creation."
+} else {
+    Write-Host "Creating Python virtual environment..."
+    python -m venv .venv
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to create virtual environment. Is Python installed?"
+        exit 1
+    }
 }
 
 # Activate — PowerShell uses a different activate script to cmd/bash
