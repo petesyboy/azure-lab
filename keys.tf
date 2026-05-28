@@ -19,7 +19,12 @@ resource "azurerm_key_vault_secret" "lab_key" {
 }
 
 resource "local_sensitive_file" "lab_key_pem" {
-  content         = tls_private_key.lab_key.private_key_openssh
+  # Use the PKCS#1 PEM format ("BEGIN RSA PRIVATE KEY") rather than
+  # the OpenSSH format ("BEGIN OPENSSH PRIVATE KEY").  On Windows,
+  # OpenSSH-format keys produce "type 0 / no identity pubkey loaded"
+  # errors because the Windows SSH client handles the two formats
+  # differently and is far stricter about the OpenSSH variant.
+  content         = tls_private_key.lab_key.private_key_pem
   filename        = "${path.module}/lab_key.pem"
   file_permission = "0400"
 }

@@ -79,7 +79,8 @@ def fetch_and_fix_ssh_key():
                     "az", "keyvault", "secret", "download",
                     "--vault-name", kv_name,
                     "--name", sec_name,
-                    "--file", key_file
+                    "--file", key_file,
+                    "--encoding", "ascii"  # Prevent BOM/CRLF corruption on Windows
                 ]
                 subprocess.run(dl_cmd)
     except Exception as e:
@@ -91,11 +92,15 @@ def fetch_and_fix_ssh_key():
             if os.name == 'posix':
                 os.chmod(key_file, 0o400)
             elif os.name == 'nt':
-                # Lock down file using Windows icacls
-                subprocess.run(["icacls", key_file, "/inheritance:r"], capture_output=True)
+                # Lock down file using Windows icacls so SSH doesn't reject it.
+                # SSH on Windows refuses keys that are readable by anyone other
+                # than the owner (equivalent of chmod 400 on Linux).
                 import getpass
                 user = getpass.getuser()
-                subprocess.run(["icacls", key_file, "/grant:r", f"{user}:F"], capture_output=True)
+                subprocess.run(["icacls", key_file, "/inheritance:r"], capture_output=True)         # Remove inherited ACEs
+                subprocess.run(["icacls", key_file, "/remove", "Everyone"], capture_output=True)    # Deny Everyone
+                subprocess.run(["icacls", key_file, "/remove", "BUILTIN\\Users"], capture_output=True)  # Deny Users group
+                subprocess.run(["icacls", key_file, "/grant:r", f"{user}:R"], capture_output=True)  # Grant owner Read-only
         except Exception as e:
             print(f"[!] Warning: Could not adjust permissions on {key_file}: {e}")
 
