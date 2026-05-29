@@ -348,6 +348,7 @@ locals {
       - iperf3
       - curl
       - jq
+      - tcpreplay
 
     write_files:
       # UCT-V Agent Config Placeholder
@@ -431,6 +432,11 @@ locals {
         permissions: '0755'
         owner: root:root
         content: ${jsonencode(local.shared_uctv_download_script)}
+
+      - path: /usr/local/bin/generate_web_traffic.sh
+        permissions: '0755'
+        owner: root:root
+        content: ${jsonencode(file("${path.module}/scripts/generate_web_traffic.sh"))}
 
     ssh_authorized_keys:
       - ${tls_private_key.lab_key.public_key_openssh}
@@ -451,6 +457,7 @@ locals {
       - iperf3
       - curl
       - jq
+      - tcpreplay
 
     write_files:
       # UCT-V Agent Config Placeholder
@@ -534,6 +541,11 @@ locals {
         permissions: '0755'
         owner: root:root
         content: ${jsonencode(local.shared_uctv_download_script)}
+
+      - path: /usr/local/bin/generate_web_traffic.sh
+        permissions: '0755'
+        owner: root:root
+        content: ${jsonencode(file("${path.module}/scripts/generate_web_traffic.sh"))}
 
     ssh_authorized_keys:
       - ${tls_private_key.lab_key.public_key_openssh}

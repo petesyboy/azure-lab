@@ -1,5 +1,5 @@
 ################################################################################
-# AZURE LAB 6.12 - GIGAMON V SERIES CLOUD TAP DEPLOYMENT
+# AZURE LAB 6.12 - GIGAMON V SERIES CLOUD TAP DEPLOYMENT v1.0
 #
 # See README.md for comprehensive documentation including:
 # - Architecture overview and design principles

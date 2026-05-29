@@ -195,9 +195,9 @@ def fetch_and_fix_ssh_key():
         print(f"[!] Warning: Could not lock down permissions on {key_file}: {e}")
 
 def main():
-    print("======================================================")
-    print(" Azure Lab 6.1x - Gigamon V Series Deployment Wrapper ")
-    print("======================================================")
+    print("===========================================================")
+    print(" Azure Lab 6.1x - Gigamon V Series Deployment Wrapper v1.0 ")
+    print("===========================================================")
     
     # 1. Check dependencies
     check_dependencies()

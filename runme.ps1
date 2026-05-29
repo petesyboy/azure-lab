@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Azure Lab 6.1x - Gigamon V Series Deployment Wrapper (PowerShell)
+    Azure Lab 6.1x - Gigamon V Series Deployment Wrapper v1.0 (PowerShell)
 .DESCRIPTION
     PowerShell equivalent of runme.bat / runme.sh.
     Checks Azure CLI login state, creates a Python venv, installs

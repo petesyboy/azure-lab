@@ -1,4 +1,4 @@
-# Azure Lab: Gigamon V Series Cloud Tap Deployment
+# Azure Lab: Gigamon V Series Cloud Tap Deployment v1.0
 
 This repository contains Terraform Infrastructure-as-Code (IaC) and Python automation to deploy a complete Gigamon V Series traffic visibility lab in Microsoft Azure.
 
