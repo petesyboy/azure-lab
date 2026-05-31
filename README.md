@@ -91,6 +91,15 @@ terraform output | Select-String "ssh_"
 
 
 ### 2. Generate Traffic
+You can generate test traffic using the provided web traffic simulation script or manually via `iperf3`.
+
+**Option A: Web Traffic Simulation**
+A script is provided to simulate staggered DNS and HTTP/HTTPS requests to over 500 websites.
+This script is automatically deployed to the production VMs during provisioning.
+1. SSH into one of the Production VMs.
+2. Run the script: `/usr/local/bin/generate_web_traffic.sh`
+
+**Option B: iPerf3**
 Run `iperf3` between the two production VMs to generate inspectable traffic:
 - **On Prod VM 2 (Server):** `iperf3 -s`
 - **On Prod VM 1 (Client):** `iperf3 -c <prod2_private_ip> -t 300`

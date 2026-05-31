@@ -14,7 +14,7 @@ resource "azurerm_key_vault_secret" "lab_key" {
   key_vault_id = azurerm_key_vault.fm_token_kv.id
 
   depends_on = [
-    azurerm_role_assignment.kv_secrets_officer_current_user
+    time_sleep.wait_for_kv_rbac
   ]
 }
 
@@ -23,4 +23,3 @@ resource "local_sensitive_file" "lab_key_pem" {
   filename        = "${path.module}/lab_key.pem"
   file_permission = "0400"
 }
-

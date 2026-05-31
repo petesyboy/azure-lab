@@ -64,22 +64,7 @@ WEBSITES=(
 )
 
 echo "=========================================================="
-echo " Step 1: Performing Pre-Flight DNS Lookups"
-echo "=========================================================="
-for site in "${WEBSITES[@]}"; do
-  echo -n "Resolving ${site}... "
-  
-  # Try dig first for cleaner output, fallback to getent if dig is missing
-  if command -v dig &> /dev/null; then
-    dig +short "$site" | grep -E '^[0-9.]+$' | head -n 1 || echo "No IPv4 found"
-  else
-    getent hosts "$site" | awk '{ print $1 }' | head -n 1 || echo "Failed to resolve"
-  fi
-done
-
-echo ""
-echo "=========================================================="
-echo " Step 2: Fetching Web Pages (Staggered)"
+echo " Generating Web Traffic (Staggered with DNS Resolution)"
 echo "=========================================================="
 for site in "${WEBSITES[@]}"; do
   # Generate a random delay between 1 and 500 ms
@@ -87,6 +72,14 @@ for site in "${WEBSITES[@]}"; do
   
   echo "[*] Waiting ${DELAY}s..."
   sleep "$DELAY"
+
+  echo -n "[*] Resolving ${site}... "
+  # Try dig first for cleaner output, fallback to getent if dig is missing
+  if command -v dig &> /dev/null; then
+    dig +short "$site" | grep -E '^[0-9.]+$' | head -n 1 || echo "No IPv4 found"
+  else
+    getent hosts "$site" | awk '{ print $1 }' | head -n 1 || echo "Failed to resolve"
+  fi
 
   echo -n "[*] Fetching https://${site} ... "
   
