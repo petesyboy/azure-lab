@@ -13,11 +13,7 @@ bash runme.sh
 
 ### Windows
 ```powershell
-az login
-python -m venv .venv
-.venv\Scripts\activate
-pip install requests
-python ami-lab-deploy.py
+.\runme.ps1
 ```
 
 ## Prerequisites & Marketplace Terms
@@ -64,16 +60,27 @@ $KV_NAME = terraform output -raw key_vault_name
 $SECRET_NAME = terraform output -raw fm_token_secret_name
 az keyvault secret set --vault-name $KV_NAME --name $SECRET_NAME --value "<PASTE_FM_TOKEN_HERE>"
 ```
-*Note: Agents automatically fetch this token from the Key Vault via managed identity to self-register.*
+*Note: Agents automatically fetch this token from the Key Vault via managed identity to self-register. They will continually retry every 60 seconds until a valid token is found.*
 
-## Create the Monitoring Session.
+## Create the Monitoring Session
 
-1. Login to GigaVUE-FM.
-2. Click on **Monitor** in the left pane.
-3. Click on **Monitoring Session**.
-4. Click on **New Session**.
-5. Add in the map and tunnel (use the IP address of the Tool VM and port 4789) as the tunnel endpoint.
-6. Click on **Save**.
+To start inspecting traffic, you must instruct the Gigamon fabric how to route traffic from the UCT-V agents to the Tool VM.
+
+1. Login to **GigaVUE-FM**.
+2. In the left navigation pane, go to **Traffic** > **Virtual** > **Orchestrated Flows** > **Azure** (or **Monitor** > **Monitoring Session** depending on your UI version).
+3. Click **New Session** (or **Create**).
+4. **Session Name**: Enter a descriptive name (e.g., `Azure-Lab-Session`).
+5. **Select Source**: Choose the `Azure-3PO-Connection` (or the connection you specified in your variables) and select the Production VMs running the UCT-V agents as the target source.
+6. **Configure the Map (Traffic Rules)**:
+   - Create a new map to define what traffic to capture.
+   - To capture all IPv4 traffic, add a rule where **Type** = `MacV4` (or `IPv4`), **Source/Dest** = `Any`, and set the action to **Pass**.
+7. **Configure the Tunnel (Destination)**:
+   - Create or drag a new tunnel endpoint onto the canvas to act as the destination for your map.
+   - **Tunnel Type**: `VXLAN`
+   - **Destination IP**: Enter the **Private IP address of the Tool VM** (find this in the Terraform outputs).
+   - **Destination Port**: `4789`
+   - **Tunnel ID (VNI)**: `123` *(CRITICAL: The Tool VM's automated configuration explicitly expects VNI `123`. If this does not match, ntopng will not see the traffic!)*
+8. **Link and Deploy**: Connect your source, map, and tunnel endpoint in the visual canvas. Click **Save** or **Deploy** to push the configuration to the vSeries nodes.
 
 ## Usage & Verification
 
@@ -121,6 +128,14 @@ A Python script is provided to generate a high volume of UDP messages to the net
 - In **GigaVUE-FM**, configure your AMX node to export metadata via **UDP/JSON** to the Tool VM's private IP on port `1514`.
 
 ---
+
+---
+
+## Troubleshooting
+
+**Configuration Script Fails (SSH Delay):**
+If the final step of the deployment script (`configure_lab.py`) fails due to an SSH timeout (VMs are fully provisioned but SSH daemons are not yet responsive), the underlying infrastructure was still successfully deployed. You can safely retry the post-deployment SSH configuration at any time by running:
+`python scripts/configure_lab.py`
 
 ## Support & Contact
 For questions, issues, or contributions regarding this lab configuration, please reach out to:
