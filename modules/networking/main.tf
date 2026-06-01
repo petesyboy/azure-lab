@@ -238,6 +238,31 @@ resource "azurerm_network_security_group" "nsg_visibility" {
   }
 }
 
+security_rule {
+  name                       = "Allow-Kibana-UI"
+  priority                   = 130 # Adjust priority as needed to not conflict with existing rules
+  direction                  = "Inbound"
+  access                     = "Allow"
+  protocol                   = "Tcp"
+  source_port_range          = "*"
+  destination_port_range     = "5601"
+  source_address_prefix      = var.allowed_mgmt_ip
+  destination_address_prefix = "*"
+}
+
+security_rule {
+  name                       = "Allow-Logstash-Internal"
+  priority                   = 131
+  direction                  = "Inbound"
+  access                     = "Allow"
+  protocol                   = "Tcp"
+  source_port_range          = "*"
+  destination_port_range     = "5044"
+  source_address_prefix      = "VirtualNetwork"
+  destination_address_prefix = "*"
+}
+
+
 resource "azurerm_subnet_network_security_group_association" "visibility_nsg_assoc" {
   subnet_id                 = azurerm_subnet.visibility_subnet.id
   network_security_group_id = azurerm_network_security_group.nsg_visibility.id

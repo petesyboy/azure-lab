@@ -128,6 +128,11 @@ output "ntopng_ui_url" {
   description = "Clickable URL for the ntopng Web UI on the Tool VM"
 }
 
+output "kibana_ui_url" {
+  value       = "http://${module.elk_vm.public_ip}:5601"
+  description = "Clickable URL for the Kibana Web UI on the ELK VM"
+}
+
 output "deployer_public_ip" {
   value       = local.resolved_mgmt_ip
   description = "The public IP address or CIDR range allowed for management access."

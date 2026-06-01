@@ -4,6 +4,8 @@ This repository contains Terraform Infrastructure-as-Code (IaC) and Python autom
 
 ## TL;DR / Quick Start
 
+The deployment wrapper scripts (`runme.sh`, `runme.bat`, `runme.ps1`) handle environment setup, dependency installation, Terraform execution, and will output the total elapsed deployment time upon completion.
+
 ### Mac / Linux
 ```bash
 bash runme.sh
@@ -39,6 +41,7 @@ az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-s
 - **Gigamon Fabric**: GigaVUE-FM (Management), UCT-V Controller (Tap Management), vSeries & AMX Nodes (Traffic Processing).
 - **Workloads**: 
   - **Tool VM**: Sink for mirrored traffic and AMX metadata (Visibility Subnet).
+  - **ELK VM**: Elasticsearch, Logstash, and Kibana stack for ingesting Application Metadata Intelligence (AMI) records (Visibility Subnet).
   - **Production VMs**: Ubuntu workloads for traffic generation (Production Subnet).
 
 ## Post-Deployment Configuration (CRITICAL)
@@ -104,9 +107,19 @@ Run `iperf3` between the two production VMs to generate inspectable traffic:
 - **On Prod VM 2 (Server):** `iperf3 -s`
 - **On Prod VM 1 (Client):** `iperf3 -c <prod2_private_ip> -t 300`
 
+**Option C: UDP Barrage (Python)**
+A Python script is provided to generate a high volume of UDP messages to the netcat listener.
+- **On Prod VM 2 (Server):** Run `/usr/local/bin/start_nc_listener.sh`
+- **On Prod VM 1 (Client):** Run `udp_barrage.py <prod2_private_ip> --count 5000`
+
 ### 3. Verify Visibility
 - **ntopng**: Access `http://<tool_vm_public_ip>:3000` (admin/admin), select the `vxlan0` interface to see real-time mirrored traffic.
 - **Raw Packet Dump**: Run `sudo tcpdump -i vxlan0 -n` on the Tool VM.
+
+### 4. Verify Application Metadata Intelligence (AMI)
+- **Kibana**: Access `http://<elk_vm_public_ip>:5601`.
+- Create a Data View in Kibana matching `gigamon-ami-*` to visualize the parsed metadata records.
+- In **GigaVUE-FM**, configure your AMX node to export metadata via **TCP/JSON** to the ELK VM's private IP on port `5044`.
 
 ---
 

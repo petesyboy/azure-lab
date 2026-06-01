@@ -339,6 +339,63 @@ locals {
   EOF
   , "\r", "")
 
+  # ELK VM Cloud-Init
+  # Installs Elasticsearch, Logstash, and Kibana for AMI record ingestion
+  elk_cloud_init = replace(<<-EOF
+    #cloud-config
+    package_upgrade: true
+    packages:
+      - apt-transport-https
+      - ufw
+      - curl
+      - jq
+    
+    runcmd:
+      # Add Elastic repo
+      - wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
+      - echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main" > /etc/apt/sources.list.d/elastic-8.x.list
+      - apt-get update -y
+      - apt-get install -y elasticsearch logstash kibana
+      
+      # Configure Elasticsearch (disable security for lab ease-of-use)
+      - echo "network.host: 0.0.0.0" >> /etc/elasticsearch/elasticsearch.yml
+      - echo "xpack.security.enabled: false" >> /etc/elasticsearch/elasticsearch.yml
+      - echo "discovery.type: single-node" >> /etc/elasticsearch/elasticsearch.yml
+      
+      # Configure Kibana
+      - echo "server.host: 0.0.0.0" >> /etc/kibana/kibana.yml
+      - echo "elasticsearch.hosts: [\"http://localhost:9200\"]" >> /etc/kibana/kibana.yml
+      
+      # Configure Logstash to receive AMI records (JSON over TCP 5044)
+      - |
+        cat << 'LOGSTASH_CONF' > /etc/logstash/conf.d/ami.conf
+        input {
+          tcp {
+            port => 5044
+            codec => json
+          }
+        }
+        output {
+          elasticsearch {
+            hosts => ["http://localhost:9200"]
+            index => "gigamon-ami-%%{+YYYY.MM.dd}"
+          }
+        }
+        LOGSTASH_CONF
+      
+      # Enable and start services
+      - systemctl daemon-reload
+      - systemctl enable elasticsearch logstash kibana
+      - systemctl start elasticsearch
+      - systemctl start kibana
+      - systemctl start logstash
+      
+      # Firewall rules
+      - ufw allow 5601/tcp  # Kibana UI
+      - ufw allow 5044/tcp  # Logstash input
+  EOF
+  , "\r", "")
+
   # prod1: iperf3 + uctv-agent config placeholder
   # Removed ntopng/vxlan from here
   prod1_cloud_init = replace(<<-EOF
@@ -442,6 +499,11 @@ locals {
         permissions: '0755'
         owner: root:root
         content: ${jsonencode(file("${path.module}/scripts/start_nc_listener.sh"))}
+
+      - path: /usr/local/bin/udp_barrage.py
+        permissions: '0755'
+        owner: root:root
+        content: ${jsonencode(file("${path.module}/scripts/udp_barrage.py"))}
 
     ssh_authorized_keys:
       - ${tls_private_key.lab_key.public_key_openssh}
@@ -556,6 +618,11 @@ locals {
         permissions: '0755'
         owner: root:root
         content: ${jsonencode(file("${path.module}/scripts/start_nc_listener.sh"))}
+
+      - path: /usr/local/bin/udp_barrage.py
+        permissions: '0755'
+        owner: root:root
+        content: ${jsonencode(file("${path.module}/scripts/udp_barrage.py"))}
 
     ssh_authorized_keys:
       - ${tls_private_key.lab_key.public_key_openssh}

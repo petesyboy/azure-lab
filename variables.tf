@@ -93,6 +93,11 @@ variable "ubuntu_vm_size" {
   default = "Standard_B2s" # Burstable series suitable for low-traffic tests
 }
 
+variable "elk_vm_size" {
+  type    = string
+  default = "Standard_D4s_v5" # ELK stack requires more memory
+}
+
 # -----------------------------------------------------------------------------
 # Gigamon Image References (Azure Marketplace)
 # -----------------------------------------------------------------------------
