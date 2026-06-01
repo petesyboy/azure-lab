@@ -238,7 +238,7 @@ resource "azurerm_network_security_group" "nsg_visibility" {
   }
   security_rule {
     name                       = "Allow-Kibana-UI"
-    priority                   = 130 # Adjust priority as needed to not conflict with existing rules
+    priority                   = 196 # Adjust priority as needed to not conflict with existing rules
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
@@ -250,7 +250,7 @@ resource "azurerm_network_security_group" "nsg_visibility" {
 
   security_rule {
     name                       = "Allow-Logstash-Internal"
-    priority                   = 131
+    priority                   = 197
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
