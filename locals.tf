@@ -438,6 +438,11 @@ locals {
         owner: root:root
         content: ${jsonencode(file("${path.module}/scripts/generate_web_traffic.sh"))}
 
+      - path: /usr/local/bin/start_nc_listener.sh
+        permissions: '0755'
+        owner: root:root
+        content: ${jsonencode(file("${path.module}/scripts/start_nc_listener.sh"))}
+
     ssh_authorized_keys:
       - ${tls_private_key.lab_key.public_key_openssh}
 
@@ -546,6 +551,11 @@ locals {
         permissions: '0755'
         owner: root:root
         content: ${jsonencode(file("${path.module}/scripts/generate_web_traffic.sh"))}
+
+      - path: /usr/local/bin/start_nc_listener.sh
+        permissions: '0755'
+        owner: root:root
+        content: ${jsonencode(file("${path.module}/scripts/start_nc_listener.sh"))}
 
     ssh_authorized_keys:
       - ${tls_private_key.lab_key.public_key_openssh}
