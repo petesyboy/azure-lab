@@ -113,6 +113,11 @@ output "ssh_tool_vm" {
   description = "SSH command for Tool VM"
 }
 
+output "ssh_elk_vm" {
+  value       = "ssh -i ./lab_key.pem ${var.admin_username}@${module.elk_vm.public_ip}"
+  description = "SSH command for ELK VM"
+}
+
 output "ssh_prod1" {
   value       = "ssh -i ./lab_key.pem ${var.admin_username}@${module.prod1.public_ip}"
   description = "SSH command for Production VM 1"

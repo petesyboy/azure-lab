@@ -163,6 +163,24 @@ def delete_keyvault_secret(az_cmd):
     except Exception as e:
         print(f"Note: Key Vault cleanup encountered an issue (non-fatal): {e}")
 
+def get_existing_token_from_kv(az_cmd):
+    """Attempts to retrieve the existing token from Key Vault."""
+    print(f"\n[*] Checking Key Vault '{KEY_VAULT_NAME}' for existing FM token...")
+    cmd = [
+        az_cmd, "keyvault", "secret", "show",
+        "--vault-name", KEY_VAULT_NAME,
+        "--name", FM_TOKEN_SECRET_NAME,
+        "--query", "value",
+        "-o", "tsv"
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
 def get_auth_token():
     """
     Cleans up any existing token in Key Vault, then prompts the user
@@ -528,20 +546,50 @@ def main():
         print("FM is not reachable. Is the VM running?")
         sys.exit(1)
 
-    # 1. Get FM API token (from Key Vault via Azure CLI)
-    # Note: Instructions for uploading the token are provided by the ami-lab-deploy.py wrapper.
-    agent_token = FM_TOKEN if FM_TOKEN else get_auth_token()
+    az_cmd = shutil.which("az") or ("az.cmd" if os.name == 'nt' else "az")
+    domain_exists = False
+    token_valid = False
 
-    # Build auth headers from the token
+    # 1. Try to use an existing token to check if domain is already set up
+    agent_token = FM_TOKEN if FM_TOKEN else get_existing_token_from_kv(az_cmd)
+    
     global AUTH_HEADERS
-    AUTH_HEADERS = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Authorization": f"Bearer {agent_token}"
-    }
+    if agent_token:
+        AUTH_HEADERS = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {agent_token}"
+        }
+        print("[*] Found token. Checking validity and Monitoring Domain status...")
+        test_url = f"{FM_URL}/api/v1.3/cloud/monitoringDomains"
+        try:
+            resp = requests.get(test_url, headers=AUTH_HEADERS, verify=False, timeout=10)
+            if resp.status_code == 200:
+                token_valid = True
+                data = resp.json()
+                domains = data.get('monitoringDomains', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                for d in domains:
+                    if isinstance(d, dict) and d.get('alias') == FM_GROUP:
+                        domain_exists = True
+                        print(f"[*] Monitoring Domain '{FM_GROUP}' already exists.")
+                        break
+            elif resp.status_code in [401, 403]:
+                print("[!] Existing token is invalid or expired.")
+                agent_token = None  # Force prompt
+        except Exception as e:
+            print(f"[*] Could not verify token/domain: {e}")
 
-    # Validate and potentially update the token if unauthorized
-    agent_token = validate_and_update_token(agent_token)
+    if not token_valid and not agent_token:
+        agent_token = get_auth_token()
+        AUTH_HEADERS = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {agent_token}"
+        }
+
+    # Ensure token is valid before proceeding
+    if not token_valid:
+        agent_token = validate_and_update_token(agent_token)
 
     monitoring_domain = FM_GROUP
     subgroup_name = FM_SUBGROUP
@@ -556,15 +604,18 @@ def main():
 
     # FM API Configuration (Monitoring Domain + Connection)
     print("--- Step 1/1: FM API Configuration ---")
-    print(f"Creating Monitoring Domain '{monitoring_domain}'...")
-
-    domain_id = create_monitoring_domain(monitoring_domain)
-
-    if domain_id:
-        create_anycloud_connection(domain_id, subgroup_name)
+    if domain_exists:
+        print(f"Monitoring Domain '{monitoring_domain}' already exists. Skipping creation.")
     else:
-        print("\n[WARNING] Monitoring Domain creation failed or skipped.")
-        print("You can retry later once FM is fully initialized.")
+        print(f"Creating Monitoring Domain '{monitoring_domain}'...")
+
+        domain_id = create_monitoring_domain(monitoring_domain)
+
+        if domain_id:
+            create_anycloud_connection(domain_id, subgroup_name)
+        else:
+            print("\n[WARNING] Monitoring Domain creation failed or skipped.")
+            print("You can retry later once FM is fully initialized.")
 
     # 3. Register the UCTV node via SSH
     push_node_config(agent_token, UCTV_CONTROLLER_FQDN, "UCTV Controller", "uctv-cntlr", "Step 2/5")

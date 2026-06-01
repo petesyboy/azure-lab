@@ -349,22 +349,35 @@ locals {
       - ufw
       - curl
       - jq
+
+    ssh_authorized_keys:
+      - ${tls_private_key.lab_key.public_key_openssh}
     
     runcmd:
       # Add Elastic repo
       - wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
       - echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main" > /etc/apt/sources.list.d/elastic-8.x.list
       - apt-get update -y
-      - apt-get install -y elasticsearch logstash kibana
+      - DEBIAN_FRONTEND=noninteractive apt-get install -y elasticsearch logstash kibana
       
       # Configure Elasticsearch (disable security for lab ease-of-use)
-      - echo "network.host: 0.0.0.0" >> /etc/elasticsearch/elasticsearch.yml
-      - echo "xpack.security.enabled: false" >> /etc/elasticsearch/elasticsearch.yml
-      - echo "discovery.type: single-node" >> /etc/elasticsearch/elasticsearch.yml
+      - |
+        cat << 'ES_CONF' > /etc/elasticsearch/elasticsearch.yml
+        cluster.name: lab-cluster
+        node.name: elk-node
+        network.host: 0.0.0.0
+        discovery.type: single-node
+        xpack.security.enabled: false
+        xpack.security.http.ssl.enabled: false
+        ES_CONF
       
       # Configure Kibana
-      - echo "server.host: 0.0.0.0" >> /etc/kibana/kibana.yml
-      - echo "elasticsearch.hosts: [\"http://localhost:9200\"]" >> /etc/kibana/kibana.yml
+      - |
+        cat << 'KIBANA_CONF' > /etc/kibana/kibana.yml
+        server.port: 5601
+        server.host: "0.0.0.0"
+        elasticsearch.hosts: ["http://localhost:9200"]
+        KIBANA_CONF
       
       # Configure Logstash to receive AMI records (JSON over TCP 5044)
       - |
@@ -386,11 +399,12 @@ locals {
       # Enable and start services
       - systemctl daemon-reload
       - systemctl enable elasticsearch logstash kibana
-      - systemctl start elasticsearch
-      - systemctl start kibana
-      - systemctl start logstash
+      - systemctl restart elasticsearch
+      - systemctl restart kibana
+      - systemctl restart logstash
       
       # Firewall rules
+      - ufw allow 22/tcp    # SSH
       - ufw allow 5601/tcp  # Kibana UI
       - ufw allow 5044/tcp  # Logstash input
   EOF
