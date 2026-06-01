@@ -10,6 +10,8 @@
 
 $ErrorActionPreference = 'Stop'
 
+$startTime = Get-Date
+
 # -- Azure CLI login check ----------------------------------------------------
 Write-Host "Checking Azure CLI login status..."
 $azStatus = az account show 2>$null
@@ -56,4 +58,10 @@ if ($LASTEXITCODE -ne 0) {
 # -- Launch deployment --------------------------------------------------------
 Write-Host "Launching deployment..."
 python ami-lab-deploy.py
-exit $LASTEXITCODE
+$deployExitCode = $LASTEXITCODE
+
+$endTime = Get-Date
+$elapsedTime = $endTime - $startTime
+Write-Host ("Deployment elapsed time: {0:hh\:mm\:ss}" -f $elapsedTime)
+
+exit $deployExitCode

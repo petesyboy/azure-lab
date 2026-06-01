@@ -1,5 +1,7 @@
 @echo off
 
+for /f %%i in ('powershell -NoProfile -Command "(Get-Date).Ticks"') do set START_TICKS=%%i
+
 az account show >nul 2>&1
 if %errorlevel% neq 0 (
     echo Not logged in to Azure. Running 'az login'...
@@ -30,4 +32,9 @@ if %errorlevel% neq 0 (
 )
 
 python ami-lab-deploy.py
-exit /b %errorlevel%
+set DEPLOY_EXIT_CODE=%errorlevel%
+
+for /f %%i in ('powershell -NoProfile -Command "(Get-Date).Ticks"') do set END_TICKS=%%i
+powershell -NoProfile -Command "$ts = [timespan]::FromTicks(%END_TICKS% - %START_TICKS%); Write-Host ('Deployment elapsed time: {0:hh\:mm\:ss}' -f $ts)"
+
+exit /b %DEPLOY_EXIT_CODE%
