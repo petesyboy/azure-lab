@@ -392,7 +392,7 @@ module "tool_vm" {
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
   subnet_id           = module.networking.visibility_subnet_id # Deployed in Visibility Subnet
-  vm_size             = var.ubuntu_vm_size
+  vm_size             = var.tool_vm_size
   admin_username      = var.admin_username
   ssh_public_key      = tls_private_key.lab_key.public_key_openssh
   image_publisher     = local.ubuntu_publisher
@@ -405,30 +405,6 @@ module "tool_vm" {
   nic_name            = "nic-tool"
   ip_config_name      = "ipconfig-tool"
   role_tag            = "tool-vm"
-  owner_email         = var.gigamon_email
-  project_tag         = var.project_name
-}
-
-module "elk_vm" {
-  source = "./modules/linux-vm"
-
-  vm_name             = "connolly-elk-vm"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
-  subnet_id           = module.networking.visibility_subnet_id # Deployed in Visibility Subnet
-  vm_size             = var.elk_vm_size
-  admin_username      = var.admin_username
-  ssh_public_key      = tls_private_key.lab_key.public_key_openssh
-  image_publisher     = local.ubuntu_publisher
-  image_offer         = local.ubuntu_offer
-  image_sku           = local.ubuntu_sku
-  image_version       = local.ubuntu_version
-  custom_data         = base64encode(local.elk_cloud_init)
-  os_disk_name        = "osdisk-elk"
-  pip_name            = "pip-elk"
-  nic_name            = "nic-elk"
-  ip_config_name      = "ipconfig-elk"
-  role_tag            = "elk-server"
   owner_email         = var.gigamon_email
   project_tag         = var.project_name
 }

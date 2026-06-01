@@ -262,7 +262,7 @@ locals {
   EOF
   , "\r", "")
 
-  # Tool VM: ntopng + VXLAN termination
+  # Tool VM: ntopng + VXLAN termination + ELK Stack
   # Deployed in Visibility Subnet
   tool_vm_cloud_init = replace(<<-EOF
     #cloud-config
@@ -272,6 +272,7 @@ locals {
       - ufw
       - curl
       - jq
+      - apt-transport-https
 
     write_files:
       # Script to configure VXLAN interface
@@ -322,6 +323,7 @@ locals {
       - ${tls_private_key.lab_key.public_key_openssh}
 
     runcmd:
+      # --- VXLAN & ntopng Setup ---
       - systemctl daemon-reload
       - systemctl enable vxlan0.service
       - systemctl start vxlan0.service
@@ -331,29 +333,8 @@ locals {
       - echo "-i=vxlan0" >> /etc/ntopng.conf
       - systemctl enable ntopng || true
       - systemctl restart ntopng || true
-      # Add local firewall exception for VXLAN UDP 4789 (no-op if ufw disabled)
-      - ufw allow 4789/udp || true
-      # Allow ingress from UCT-V Controller and FM (if needed for tool VM logic)
-      - ufw allow from uctv.connolly.lab || true
-      - if [ -f /var/run/reboot-required ]; then reboot; fi
-  EOF
-  , "\r", "")
 
-  # ELK VM Cloud-Init
-  # Installs Elasticsearch, Logstash, and Kibana for AMI record ingestion
-  elk_cloud_init = replace(<<-EOF
-    #cloud-config
-    package_upgrade: true
-    packages:
-      - apt-transport-https
-      - ufw
-      - curl
-      - jq
-
-    ssh_authorized_keys:
-      - ${tls_private_key.lab_key.public_key_openssh}
-    
-    runcmd:
+      # --- ELK Stack Setup ---
       # Add Elastic repo
       - wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
       - echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main" > /etc/apt/sources.list.d/elastic-8.x.list
@@ -363,6 +344,8 @@ locals {
       # Configure Elasticsearch (disable security for lab ease-of-use)
       - |
         cat << 'ES_CONF' > /etc/elasticsearch/elasticsearch.yml
+        path.data: /var/lib/elasticsearch
+        path.logs: /var/log/elasticsearch
         cluster.name: lab-cluster
         node.name: elk-node
         network.host: 0.0.0.0
@@ -371,6 +354,12 @@ locals {
         xpack.security.http.ssl.enabled: false
         ES_CONF
       
+      # Recreate an empty keystore to satisfy Elasticsearch 8.x requirements without leftover passwords
+      - rm -f /etc/elasticsearch/elasticsearch.keystore
+      - /usr/share/elasticsearch/bin/elasticsearch-keystore create
+      - chown root:elasticsearch /etc/elasticsearch/elasticsearch.keystore
+      - chmod 660 /etc/elasticsearch/elasticsearch.keystore
+
       # Configure Kibana
       - |
         cat << 'KIBANA_CONF' > /etc/kibana/kibana.yml
@@ -379,12 +368,12 @@ locals {
         elasticsearch.hosts: ["http://localhost:9200"]
         KIBANA_CONF
       
-      # Configure Logstash to receive AMI records (JSON over TCP 5044)
+      # Configure Logstash to receive AMI records (JSON over UDP 1514)
       - |
         cat << 'LOGSTASH_CONF' > /etc/logstash/conf.d/ami.conf
         input {
-          tcp {
-            port => 5044
+          udp {
+            port => 1514
             codec => json
           }
         }
@@ -396,17 +385,23 @@ locals {
         }
         LOGSTASH_CONF
       
-      # Enable and start services
+      # Enable and start ELK services
       - systemctl daemon-reload
       - systemctl enable elasticsearch logstash kibana
       - systemctl restart elasticsearch
       - systemctl restart kibana
       - systemctl restart logstash
-      
-      # Firewall rules
+
+      # --- Firewall Rules Setup ---
+      # Add local firewall exception for VXLAN UDP 4789 (no-op if ufw disabled)
+      - ufw allow 4789/udp || true
+      # Allow ingress from UCT-V Controller and FM (if needed for tool VM logic)
+      - ufw allow from uctv.connolly.lab || true
       - ufw allow 22/tcp    # SSH
       - ufw allow 5601/tcp  # Kibana UI
-      - ufw allow 5044/tcp  # Logstash input
+      - ufw allow 1514/udp  # Logstash input
+
+      - if [ -f /var/run/reboot-required ]; then reboot; fi
   EOF
   , "\r", "")
 

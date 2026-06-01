@@ -253,9 +253,9 @@ resource "azurerm_network_security_group" "nsg_visibility" {
     priority                   = 197
     direction                  = "Inbound"
     access                     = "Allow"
-    protocol                   = "Tcp"
+    protocol                   = "Udp"
     source_port_range          = "*"
-    destination_port_range     = "5044"
+    destination_port_range     = "1514"
     source_address_prefix      = "VirtualNetwork"
     destination_address_prefix = "*"
   }

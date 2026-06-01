@@ -40,8 +40,7 @@ az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-s
 - **Networking**: Single VNet with two subnets (Visibility and Production).
 - **Gigamon Fabric**: GigaVUE-FM (Management), UCT-V Controller (Tap Management), vSeries & AMX Nodes (Traffic Processing).
 - **Workloads**: 
-  - **Tool VM**: Sink for mirrored traffic and AMX metadata (Visibility Subnet).
-  - **ELK VM**: Elasticsearch, Logstash, and Kibana stack for ingesting Application Metadata Intelligence (AMI) records (Visibility Subnet).
+  - **Tool VM**: Sink for mirrored traffic, ntopng, and ELK stack (Elasticsearch, Logstash, Kibana) for ingesting Application Metadata Intelligence (AMI) records (Visibility Subnet).
   - **Production VMs**: Ubuntu workloads for traffic generation (Production Subnet).
 
 ## Post-Deployment Configuration (CRITICAL)
@@ -117,9 +116,9 @@ A Python script is provided to generate a high volume of UDP messages to the net
 - **Raw Packet Dump**: Run `sudo tcpdump -i vxlan0 -n` on the Tool VM.
 
 ### 4. Verify Application Metadata Intelligence (AMI)
-- **Kibana**: Access `http://<elk_vm_public_ip>:5601`.
+- **Kibana**: Access `http://<tool_vm_public_ip>:5601`.
 - Create a Data View in Kibana matching `gigamon-ami-*` to visualize the parsed metadata records.
-- In **GigaVUE-FM**, configure your AMX node to export metadata via **TCP/JSON** to the ELK VM's private IP on port `5044`.
+- In **GigaVUE-FM**, configure your AMX node to export metadata via **UDP/JSON** to the Tool VM's private IP on port `1514`.
 
 ---
 

@@ -113,11 +113,6 @@ output "ssh_tool_vm" {
   description = "SSH command for Tool VM"
 }
 
-output "ssh_elk_vm" {
-  value       = "ssh -i ./lab_key.pem ${var.admin_username}@${module.elk_vm.public_ip}"
-  description = "SSH command for ELK VM"
-}
-
 output "ssh_prod1" {
   value       = "ssh -i ./lab_key.pem ${var.admin_username}@${module.prod1.public_ip}"
   description = "SSH command for Production VM 1"
@@ -134,8 +129,8 @@ output "ntopng_ui_url" {
 }
 
 output "kibana_ui_url" {
-  value       = "http://${module.elk_vm.public_ip}:5601"
-  description = "Clickable URL for the Kibana Web UI on the ELK VM"
+  value       = "http://${module.tool_vm.public_ip}:5601"
+  description = "Clickable URL for the Kibana Web UI on the Tool VM"
 }
 
 output "deployer_public_ip" {
