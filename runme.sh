@@ -2,6 +2,12 @@
 
 START_TIME=$(date +%s)
 
+if ! command -v az >/dev/null 2>&1; then
+    echo "Error: Azure CLI 'az' is not installed or not in PATH."
+    echo "Please install Azure CLI: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli"
+    exit 1
+fi
+
 echo "Checking Azure CLI login status..."
 if ! az account show > /dev/null 2>&1; then
     echo "Not logged in to Azure. Running 'az login'..."
@@ -38,6 +44,12 @@ DEPLOY_EXIT_CODE=$?
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 FORMATTED_TIME=$(printf '%02d:%02d:%02d' $((ELAPSED/3600)) $((ELAPSED%3600/60)) $((ELAPSED%60)))
-echo "Deployment elapsed time: ${FORMATTED_TIME}"
+
+if [ $DEPLOY_EXIT_CODE -eq 0 ]; then
+    STATUS_MSG="succeeded"
+else
+    STATUS_MSG="failed"
+fi
+echo "Deployment ${STATUS_MSG} after ${FORMATTED_TIME}"
 
 exit $DEPLOY_EXIT_CODE

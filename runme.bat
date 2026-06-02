@@ -2,6 +2,13 @@
 
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).Ticks"') do set START_TICKS=%%i
 
+where az >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Error: Azure CLI 'az' is not installed or not in PATH.
+    echo Please install Azure CLI: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-windows
+    exit /b 1
+)
+
 az account show >nul 2>&1
 if %errorlevel% neq 0 (
     echo Not logged in to Azure. Running 'az login'...
@@ -35,6 +42,11 @@ python ami-lab-deploy.py
 set DEPLOY_EXIT_CODE=%errorlevel%
 
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).Ticks"') do set END_TICKS=%%i
-powershell -NoProfile -Command "$ts = [timespan]::FromTicks(%END_TICKS% - %START_TICKS%); Write-Host ('Deployment elapsed time: {0:hh\:mm\:ss}' -f $ts)"
+if %DEPLOY_EXIT_CODE% equ 0 (
+    set STATUS_MSG=succeeded
+) else (
+    set STATUS_MSG=failed
+)
+powershell -NoProfile -Command "$ts = [timespan]::FromTicks(%END_TICKS% - %START_TICKS%); Write-Host ('Deployment %STATUS_MSG% after {0:hh\:mm\:ss}' -f $ts)"
 
 exit /b %DEPLOY_EXIT_CODE%

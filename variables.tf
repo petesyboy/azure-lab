@@ -138,6 +138,6 @@ variable "fm_token_secret_name" {
 
 variable "allowed_mgmt_ip" {
   type        = string
-  description = "The IP address or CIDR range allowed for management access (SSH, HTTPS, HTTP, ntopng UI). If set to 'dynamic' (default), it will fetch the deployer's public IP dynamically using https://ipv4.icanhazip.com."
-  default     = "dynamic"
+  description = "The IP address or CIDR range allowed for management access (SSH, HTTPS, HTTP, ntopng UI). Set to '*' to allow access from anywhere, or 'dynamic' to restrict it to your current public IP."
+  default     = "*"
 }

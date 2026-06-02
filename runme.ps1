@@ -12,6 +12,13 @@ $ErrorActionPreference = 'Stop'
 
 $startTime = Get-Date
 
+# -- Azure CLI existence check ------------------------------------------------
+if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+    Write-Error "Azure CLI 'az' is not installed or not in PATH."
+    Write-Host "Please install Azure CLI: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-windows"
+    exit 1
+}
+
 # -- Azure CLI login check ----------------------------------------------------
 Write-Host "Checking Azure CLI login status..."
 $azStatus = az account show 2>$null
@@ -62,6 +69,13 @@ $deployExitCode = $LASTEXITCODE
 
 $endTime = Get-Date
 $elapsedTime = $endTime - $startTime
-Write-Host ("Deployment elapsed time: {0:hh\:mm\:ss}" -f $elapsedTime)
+
+if ($deployExitCode -eq 0) {
+    $statusMsg = "succeeded"
+}
+else {
+    $statusMsg = "failed"
+}
+Write-Host ("Deployment {0} after {1:hh\:mm\:ss}" -f $statusMsg, $elapsedTime)
 
 exit $deployExitCode
