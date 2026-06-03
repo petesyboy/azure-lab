@@ -3,7 +3,26 @@ import subprocess
 import sys
 import concurrent.futures
 
-def check_vm(rg_name, display_name, vm_name):
+def check_vm(rg_name, display_name, vm_name, vm_type="linux"):
+    if vm_type == "appliance":
+        # Proprietary NVAs block the Azure RunCommand extension.
+        # We query the Azure Fabric directly for their PowerState instead.
+        cmd = [
+            "az", "vm", "get-instance-view",
+            "--name", vm_name,
+            "-g", rg_name,
+            "--query", "instanceView.statuses[?starts_with(code, 'PowerState/')].displayStatus",
+            "-o", "tsv"
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if res.returncode == 0 and "VM running" in res.stdout:
+                return display_name, True, "FABRIC OK", "APPLIANCE"
+            else:
+                return display_name, False, "NOT RUNNING", "UNKNOWN"
+        except subprocess.TimeoutExpired:
+            return display_name, False, "TIMEOUT (Azure API)", "UNKNOWN"
+
     # A universally applicable one-liner shell script.
     # 1. Confirms Azure VM Agent responsiveness (PING).
     # 2. Checks gigamon-cloud.conf to see if the Key Vault token was successfully replaced.
@@ -74,16 +93,16 @@ def main():
     print("[*] Querying VMs via Azure CLI (this may take 1-2 minutes)...\n")
     
     vms = [
-        ("vSeries Node", "connolly-vseries-node"),
-        ("UCTV Controller", "connolly-uctv-controller"),
-        ("Production VM 1", "connolly-prod-ubuntu-1"),
-        ("Production VM 2", "connolly-prod-ubuntu-2")
+        ("vSeries Node", "connolly-vseries-node", "appliance"),
+        ("UCTV Controller", "connolly-uctv-controller", "appliance"),
+        ("Production VM 1", "connolly-prod-ubuntu-1", "linux"),
+        ("Production VM 2", "connolly-prod-ubuntu-2", "linux")
     ]
 
     all_healthy = True
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(check_vm, rg_name, disp, name): disp for disp, name in vms}
+        futures = {executor.submit(check_vm, rg_name, disp, name, vtype): disp for disp, name, vtype in vms}
         
         for future in concurrent.futures.as_completed(futures):
             disp, healthy, svc, token = future.result()
