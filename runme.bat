@@ -21,6 +21,17 @@ if %errorlevel% neq 0 (
     echo Already logged in to Azure.
 )
 
+rem --- Intercept 'check-fabric' argument ---
+if "%~1"=="check-fabric" (
+    echo Running fabric health checks...
+    if exist .venv\Scripts\activate.bat (
+        call .venv\Scripts\activate.bat
+    )
+    python check_fabric.py
+    exit /b %errorlevel%
+)
+
+
 if exist ".venv\Scripts\python.exe" (
     echo Virtual environment already exists -- skipping creation.
 ) else (

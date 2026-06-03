@@ -510,4 +510,10 @@ resource "local_file" "configure_script" {
     key_vault_name       = azurerm_key_vault.fm_token_kv.name
     fm_token_secret_name = var.fm_token_secret_name
   })
+
+  depends_on = [
+    time_sleep.wait_for_kv_rbac
+  ]
 }
+
+

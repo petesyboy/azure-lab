@@ -268,8 +268,81 @@ resource "azurerm_subnet_network_security_group_association" "visibility_nsg_ass
   network_security_group_id = azurerm_network_security_group.nsg_visibility.id
 }
 
-# Apply same NSG to production subnet (both subnets are in the same VNet)
+# Dedicated Production NSG to reduce attack surface on application workloads
+resource "azurerm_network_security_group" "nsg_production" {
+  name                = "nsg-production"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+
+  # SSH (management/configuration)
+  security_rule {
+    name                       = "Allow-SSH"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = var.allowed_mgmt_ip
+    destination_address_prefix = "*"
+  }
+
+  # UCT-V agent control/management (TCP 9902)
+  security_rule {
+    name                       = "Allow-UCTV-Agent-9902"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "9902"
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "*"
+  }
+
+  # UCT-V agent communication (TCP 8300)
+  security_rule {
+    name                       = "Allow-UCTV-Agent-8300"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "8300"
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "*"
+  }
+
+  # ICMP inbound (ping)
+  security_rule {
+    name                       = "Allow-ICMP-Inbound"
+    priority                   = 130
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Icmp"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  # ICMP outbound (ping replies)
+  security_rule {
+    name                       = "Allow-ICMP-Outbound"
+    priority                   = 100
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "Icmp"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+# Apply dedicated NSG to production subnet
 resource "azurerm_subnet_network_security_group_association" "production_nsg_assoc" {
   subnet_id                 = azurerm_subnet.production_subnet.id
-  network_security_group_id = azurerm_network_security_group.nsg_visibility.id
+  network_security_group_id = azurerm_network_security_group.nsg_production.id
 }
+

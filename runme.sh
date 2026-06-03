@@ -1,5 +1,22 @@
 #!/bin/bash
 
+if ! command -v az >/dev/null 2>&1; then
+    echo "Error: Azure CLI 'az' is not installed or not in PATH."
+    echo "Please install Azure CLI: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli"
+    exit 1
+fi
+
+echo "Checking Azure CLI login status..."
+if ! az account show > /dev/null 2>&1; then
+    echo "Not logged in to Azure. Running 'az login'..."
+    if ! az login; then
+        echo "Azure login failed. Aborting."
+        exit 1
+    fi
+else
+    echo "Already logged in to Azure."
+fi
+
 # --- Intercept 'check-fabric' argument ---
 if [ "$1" == "check-fabric" ]; then
     echo "Running fabric health checks..."
@@ -12,16 +29,6 @@ fi
 
 START_TIME=$(date +%s)
 
-echo "Checking Azure CLI login status..."
-if ! az account show > /dev/null 2>&1; then
-    echo "Not logged in to Azure. Running 'az login'..."
-    if ! az login; then
-        echo "Azure login failed. Aborting."
-        exit 1
-    fi
-else
-    echo "Already logged in to Azure."
-fi
 
 if [ ! -f ".venv/bin/python3" ]; then
     echo "Creating Python virtual environment..."

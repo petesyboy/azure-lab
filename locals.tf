@@ -157,9 +157,11 @@ locals {
       echo "[$(date)] Installing agent package..."
       dpkg -i /tmp/uctv-agent.deb || DEBIAN_FRONTEND=noninteractive apt-get install -f -y
     else
-      echo "ERROR: Failed to download UCT-V agent after 10 attempts."
+      echo "ERROR: Failed to download UCT-V agent after 30 attempts."
       WEBHOOK_URL="https://your-webhook.endpoint.here/api/webhook"
-      curl -X POST -H "Content-Type: application/json" -d "{\"text\":\"🚨 *Alert*: UCT-V agent download failed on VM **$(hostname)** after 10 retries.\"}" "$${WEBHOOK_URL}" || true
+      if [[ "$${WEBHOOK_URL}" != *"your-webhook.endpoint.here"* ]]; then
+        curl -X POST -H "Content-Type: application/json" -d "{\"text\":\"🚨 *Alert*: UCT-V agent download failed on VM **$(hostname)** after 30 retries.\"}" "$${WEBHOOK_URL}" || true
+      fi
       exit 1
     fi
   EOF
@@ -397,7 +399,7 @@ locals {
       # Add local firewall exception for VXLAN UDP 4789 (no-op if ufw disabled)
       - ufw allow 4789/udp || true
       # Allow ingress from UCT-V Controller and FM (if needed for tool VM logic)
-      - ufw allow from uctv.connolly.lab || true
+      - ufw allow from 10.0.0.0/16 || true
       - ufw allow 22/tcp    # SSH
       - ufw allow 5601/tcp  # Kibana UI
       - ufw allow 1514/udp  # Logstash input
@@ -505,6 +507,34 @@ locals {
         owner: root:root
         content: ${jsonencode(file("${path.module}/scripts/generate_web_traffic.sh"))}
 
+      - path: /etc/systemd/system/web-traffic.service
+        permissions: '0644'
+        owner: root:root
+        content: |
+          [Unit]
+          Description=Automated Web Traffic Generator
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/generate_web_traffic.sh
+
+      - path: /etc/systemd/system/web-traffic.timer
+        permissions: '0644'
+        owner: root:root
+        content: |
+          [Unit]
+          Description=Periodically run Automated Web Traffic Generator
+
+          [Timer]
+          OnBootSec=2m
+          OnUnitActiveSec=5m
+          AccuracySec=1s
+
+          [Install]
+          WantedBy=timers.target
+
       - path: /usr/local/bin/start_nc_listener.sh
         permissions: '0755'
         owner: root:root
@@ -523,6 +553,7 @@ locals {
 %{for cmd in local.agent_standard_runcmd~}
       - ${cmd}
 %{endfor~}
+      - systemctl enable --now web-traffic.timer
   EOF
   , "\r", "")
 
@@ -624,6 +655,34 @@ locals {
         owner: root:root
         content: ${jsonencode(file("${path.module}/scripts/generate_web_traffic.sh"))}
 
+      - path: /etc/systemd/system/web-traffic.service
+        permissions: '0644'
+        owner: root:root
+        content: |
+          [Unit]
+          Description=Automated Web Traffic Generator
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/generate_web_traffic.sh
+
+      - path: /etc/systemd/system/web-traffic.timer
+        permissions: '0644'
+        owner: root:root
+        content: |
+          [Unit]
+          Description=Periodically run Automated Web Traffic Generator
+
+          [Timer]
+          OnBootSec=2m
+          OnUnitActiveSec=5m
+          AccuracySec=1s
+
+          [Install]
+          WantedBy=timers.target
+
       - path: /usr/local/bin/start_nc_listener.sh
         permissions: '0755'
         owner: root:root
@@ -642,6 +701,7 @@ locals {
 %{for cmd in local.agent_standard_runcmd~}
       - ${cmd}
 %{endfor~}
+      - systemctl enable --now web-traffic.timer
   EOF
   , "\r", "")
 }

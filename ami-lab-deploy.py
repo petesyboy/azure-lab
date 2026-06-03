@@ -47,6 +47,34 @@ def check_uctv_deb():
     expected_file = os.path.join(deb_dir, f"gigamon-gigavue-uctv-{version}.00-amd64.deb")
     
     if not os.path.exists(expected_file):
+        # If there is exactly one deb file, try to match and update variables.tf automatically
+        if len(deb_files) == 1:
+            fn = os.path.basename(deb_files[0])
+            m = re.search(r'gigamon-gigavue-uctv-([0-9.]+)-amd64\.deb', fn)
+            if m:
+                full_ver = m.group(1)
+                parts = full_ver.split('.')
+                if len(parts) >= 2:
+                    detected_major_minor = f"{parts[0]}.{parts[1]}"
+                    if detected_major_minor != version:
+                        print(f"[*] Auto-detected UCT-V package version: {detected_major_minor} (from {fn})")
+                        print(f"[*] Updating 'gigamon_version' in 'variables.tf' to match your package...")
+                        try:
+                            with open("variables.tf", "r") as f:
+                                var_content = f.read()
+                            
+                            pattern = r'(variable\s+"gigamon_version"\s+\{[^}]*default\s*=\s*")([^"]+)(")'
+                            updated_content = re.sub(pattern, rf'\1{detected_major_minor}\3', var_content, flags=re.DOTALL)
+                            
+                            with open("variables.tf", "w") as f:
+                                f.write(updated_content)
+                            print(f"[+] Successfully updated 'variables.tf' default to '{detected_major_minor}'.")
+                            version = detected_major_minor
+                            expected_file = deb_files[0]
+                        except Exception as e:
+                            print(f"[!] Warning: Could not automatically update 'variables.tf': {e}")
+
+    if not os.path.exists(expected_file):
         print("\n" + "!"*80)
         print(f"[!] ERROR: Required UCT-V agent Debian package not found in the {deb_dir} directory!")
         print(f"    Expected file: {expected_file}")
@@ -57,6 +85,7 @@ def check_uctv_deb():
             print(f"    Please ensure the UCT-V agent deb package is placed in the {deb_dir} directory.")
         print("!"*80 + "\n")
         sys.exit(1)
+
 
 def _win_current_user():
     """

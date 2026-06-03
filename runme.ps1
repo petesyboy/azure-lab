@@ -34,6 +34,17 @@ else {
     Write-Host "Already logged in to Azure."
 }
 
+# -- Intercept 'check-fabric' argument ----------------------------------------
+if ($args.Count -gt 0 -and $args[0] -eq "check-fabric") {
+    Write-Host "Running fabric health checks..."
+    if (Test-Path ".\.venv\Scripts\Activate.ps1") {
+        . ".\.venv\Scripts\Activate.ps1"
+    }
+    python check_fabric.py
+    exit $LASTEXITCODE
+}
+
+
 # -- Python virtual environment -----------------------------------------------
 $venvPython = ".venv\Scripts\python.exe"
 if (Test-Path $venvPython) {
