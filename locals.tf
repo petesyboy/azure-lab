@@ -53,7 +53,9 @@ locals {
     SECRET_NAME="${var.fm_token_secret_name}"
     KV_API_VERSION="7.4"
     if [[ ! -f "$CONF" ]]; then exit 0; fi
-    if ! grep -q "PLACEHOLDER_TOKEN" "$CONF"; then
+    
+    CURRENT_TOKEN=$(grep -E '^[[:space:]]*token:' "$CONF" | awk '{print $2}' | tr -d '[:space:]' || true)
+    if [[ "$CURRENT_TOKEN" != "PLACEHOLDER_TOKEN" && "$${#CURRENT_TOKEN}" -gt 50 && "$CURRENT_TOKEN" == *.*.* ]]; then
       systemctl disable --now fm-token-fetch.timer >/dev/null 2>&1 || true
       exit 0
     fi
@@ -82,14 +84,14 @@ locals {
       fi
 
       FM_TOKEN="$(echo "$FM_TOKEN" | tr -d '[:space:]')"
-      if [[ -n "$FM_TOKEN" && "$FM_TOKEN" != "null" && "$FM_TOKEN" != "<PASTE_FM_TOKEN_HERE>" ]]; then
+      if [[ "$${#FM_TOKEN}" -gt 50 && "$FM_TOKEN" == *.*.* ]]; then
         break
       fi
-      echo "[$(date)] Token is empty or invalid placeholder. Attempting to obtain it again in 10 seconds..."
+      echo "[$(date)] Token is empty, too short, or not a valid JWT format. Attempting to obtain it again in 10 seconds..."
       sleep 10
     done
 
-    if [[ -z "$FM_TOKEN" || "$FM_TOKEN" == "null" || "$FM_TOKEN" == "<PASTE_FM_TOKEN_HERE>" ]]; then exit 0; fi
+    if [[ "$${#FM_TOKEN}" -le 50 || "$FM_TOKEN" != *.*.* ]]; then exit 0; fi
     sed -i "s|^\\([[:space:]]*token:\\).*|\\1 $${FM_TOKEN}|" "$CONF"
     echo "[$(date)] Token successfully updated in $CONF"
     systemctl start gigamon-agent-refresh.service >/dev/null 2>&1 || true
