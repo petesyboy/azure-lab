@@ -94,6 +94,7 @@ def main():
     
     vms = [
         ("vSeries Node", "connolly-vseries-node", "appliance"),
+        ("AMX Node", "connolly-amx-node", "appliance"),
         ("UCTV Controller", "connolly-uctv-controller", "appliance"),
         ("Production VM 1", "connolly-prod-ubuntu-1", "linux"),
         ("Production VM 2", "connolly-prod-ubuntu-2", "linux")
@@ -101,7 +102,7 @@ def main():
 
     all_healthy = True
     
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(vms)) as executor:
         futures = {executor.submit(check_vm, rg_name, disp, name, vtype): disp for disp, name, vtype in vms}
         
         for future in concurrent.futures.as_completed(futures):
