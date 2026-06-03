@@ -238,11 +238,10 @@ def main():
         result = subprocess.run([sys.executable, config_script])
         if result.returncode != 0:
             print("\n" + "!"*80)
-            print("[!] WARNING: Configuration script failed (often due to SSH initialization delays).")
+            print("[!] WARNING: Configuration script failed (SSH connection dropped).")
             print("    Your infrastructure was successfully deployed, but post-deployment")
-            print("    configuration via SSH encountered an error.")
-            print(f"    You can safely retry this configuration step later by running:")
-            print(f"        {sys.executable} {config_script}")
+            print("    configuration over SSH was blocked (likely by a Corporate VPN/Proxy).")
+            print("    VMs will continue to provision via cloud-init in the background.")
             print("!"*80 + "\n")
             sys.exit(result.returncode)
     else:

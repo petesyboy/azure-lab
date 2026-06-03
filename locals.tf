@@ -32,12 +32,11 @@ locals {
   , "\r", "")
 
   # UCT-V Controller Cloud-Init
-  # Configuration is handled post-deployment via SSH direct push.
   uctv_cloud_init = replace(<<-EOF
     #cloud-config
     packages: []
     runcmd:
-      - echo "UCT-V Controller initialized. Waiting for configuration via SSH..."
+      - echo "UCT-V Controller initialized."
   EOF
   , "\r", "")
 
