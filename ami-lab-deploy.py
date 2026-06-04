@@ -157,6 +157,7 @@ def fetch_and_fix_ssh_key():
                     "--vault-name", kv_name,
                     "--name",       sec_name,
                     "--file",       key_file,
+                    "--overwrite",
                     "--encoding",   "ascii",   # prevent BOM/CRLF on Windows
                 ]
                 # .cmd files require the Windows shell to execute
