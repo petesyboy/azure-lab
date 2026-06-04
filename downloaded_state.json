@@ -1,0 +1,208 @@
+{
+  "version": 4,
+  "terraform_version": "1.14.7",
+  "serial": 1537,
+  "lineage": "3aa1a930-bfd2-36d0-a9d3-8a59736bd163",
+  "outputs": {
+    "admin_username": {
+      "value": "peter",
+      "type": "string"
+    },
+    "deployer_public_ip": {
+      "value": "*",
+      "type": "string"
+    },
+    "fm_token_secret_name": {
+      "value": "gigamon-fm-token",
+      "type": "string"
+    },
+    "lab_key_secret_name": {
+      "value": "lab-ssh-private-key",
+      "type": "string"
+    },
+    "location": {
+      "value": "uksouth",
+      "type": "string"
+    },
+    "resource_group_name": {
+      "value": "connolly-transitory-demo-tf-3po",
+      "type": "string"
+    },
+    "storage_container_name": {
+      "value": "uctv-container",
+      "type": "string"
+    }
+  },
+  "resources": [
+    {
+      "mode": "data",
+      "type": "azurerm_client_config",
+      "name": "current",
+      "provider": "provider[\"registry.terraform.io/hashicorp/azurerm\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "client_id": "04b07795-8ddb-461a-bbee-02f9e1bf7b46",
+            "id": "Y2xpZW50Q29uZmlncy9jbGllbnRJZD0wNGIwNzc5NS04ZGRiLTQ2MWEtYmJlZS0wMmY5ZTFiZjdiNDY7b2JqZWN0SWQ9OTZmMWU0MzMtODE0Zi00NjUzLTg2NjAtNjAwMzdmZmZkYzlhO3N1YnNjcmlwdGlvbklkPWYxNzM5MDkxLTExNjYtNDFhNC1iM2NkLWZiMjUyMTUyMTU4ODt0ZW5hbnRJZD0wOTI3YjYxOS1mNmU0LTQ0NjEtYmNkYS0zMzMxOTQyNjgxMTc=",
+            "object_id": "96f1e433-814f-4653-8660-60037fffdc9a",
+            "subscription_id": "f1739091-1166-41a4-b3cd-fb2521521588",
+            "tenant_id": "0927b619-f6e4-4461-bcda-333194268117",
+            "timeouts": null
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0
+        }
+      ]
+    },
+    {
+      "mode": "data",
+      "type": "http",
+      "name": "deployer_ip",
+      "provider": "provider[\"registry.terraform.io/hashicorp/http\"]",
+      "instances": []
+    },
+    {
+      "mode": "managed",
+      "type": "local_sensitive_file",
+      "name": "lab_key_pem",
+      "provider": "provider[\"registry.terraform.io/hashicorp/local\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "content": "-----BEGIN OPENSSH PRIVATE KEY-----\n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\n-----END OPENSSH PRIVATE KEY-----\n",
+            "content_base64": null,
+            "content_base64sha256": "kxAxwodfvr8xfhNRLW1yhDyt5a/C6oqcEBcV3zlnCHg=",
+            "content_base64sha512": "VSFlc8GXsAamuG/oS4epbxoWigxbdBMBZQaQ0i/roZG32o/ZmeCe5C5FOnsIojt0X6P140f0mYi83he2tkt03g==",
+            "content_md5": "23580b9578fb3544af38f661ece54927",
+            "content_sha1": "411b3747fae133be94886bd5ca0c99a035077f91",
+            "content_sha256": "931031c2875fbebf317e13512d6d72843cade5afc2ea8a9c101715df39670878",
+            "content_sha512": "55216573c197b006a6b86fe84b87a96f1a168a0c5b741301650690d22feba191b7da8fd999e09ee42e453a7b08a23b745fa3f5e347f49988bcde17b6b64b74de",
+            "directory_permission": "0700",
+            "file_permission": "0400",
+            "filename": "./lab_key.pem",
+            "id": "411b3747fae133be94886bd5ca0c99a035077f91",
+            "source": null
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "content"
+              }
+            ],
+            [
+              {
+                "type": "get_attr",
+                "value": "content_base64"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "dependencies": [
+            "tls_private_key.lab_key"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "random_string",
+      "name": "kv_suffix",
+      "provider": "provider[\"registry.terraform.io/hashicorp/random\"]",
+      "instances": [
+        {
+          "schema_version": 2,
+          "attributes": {
+            "id": "rkjrfa7k",
+            "keepers": null,
+            "length": 8,
+            "lower": true,
+            "min_lower": 0,
+            "min_numeric": 0,
+            "min_special": 0,
+            "min_upper": 0,
+            "number": true,
+            "numeric": true,
+            "override_special": null,
+            "result": "rkjrfa7k",
+            "special": false,
+            "upper": false
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "tls_private_key",
+      "name": "lab_key",
+      "provider": "provider[\"registry.terraform.io/hashicorp/tls\"]",
+      "instances": [
+        {
+          "schema_version": 1,
+          "attributes": {
+            "algorithm": "RSA",
+            "ecdsa_curve": "P224",
+            "id": "f5dced386eb5ddff1403aa51fe27ca72b05a708b",
+            "private_key_openssh": "-----BEGIN OPENSSH PRIVATE KEY-----\n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\n-----END OPENSSH PRIVATE KEY-----\n",
+            "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\n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\n-----END RSA PRIVATE KEY-----\n",
+            "private_key_pem_pkcs8": "-----BEGIN PRIVATE KEY-----\n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\noIZfkV/EwuI13MiMND5LTRKqCyJ5\n-----END PRIVATE KEY-----\n",
+            "public_key_fingerprint_md5": "fc:67:63:3f:56:3e:e0:6e:d9:94:03:6b:a1:e8:9c:40",
+            "public_key_fingerprint_sha256": "SHA256:wyk4sYNsE+0OUjZ+fikaay9XLw5Qusdptijs2e4sZmo",
+            "public_key_openssh": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDUhOoN2QBDjLA22YM4HqmGVEVFzQ5nIvZWrTrtLHQoU0oCPAJsSWugnoxukh3uL0oRQJt7x698vhEf0tcTzRpgKT/ImjC5Q7m+yBYrpD8GvoH62bQcfc68pZPCKp3OSQNYcKP150gdgb/uvTiUW98gTp53tdM/bK8vuZlKvyXvM3nUHRvpHMZ5xrCQJ6j1nI2tT2XxKiYRVc8oZCdR96BsyCQNcsocYgUbVFFS8z3lh8iqGfv89Ft3lVGT3DU/4u/+R3OSrAP72b8JqoocoFWhHML6HxA5zLeROFbur4ALLPpWEX7Vjr882WPaP3RdLViROjq0DDduPyIC1iKoGHb3LsuLAL0c3GbR5nTCsjotnYKuCTYbRX98gZJY4G162qIAagWF0gXjz4hqoZbc57D9mxrMAJ8eJBd4vVARi+qK2bpcQeQ3+E57myriRkFhU82Yfk2DDNXuzkO0O2tm6Yiv4wh0FfCMigHQHN1IGLqyhUhSoySEXtMB9k/0z0Esmhm5a0c3QYjO1S0AYgDpoZIxWhKeO1k8Hg6zvxhkK05YNA2+Ir2OiWkI7bkCASJTuBvUyXoEY0WwCoByDfeBti334raPgggqPle9qQsToM+uKS3g8J7mYpTqvYonZ2oAtmyE1cFPpqoXsmvPrdr63OGLp8KCZgCAacevekIgfkRRJQ==\n",
+            "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA1ITqDdkAQ4ywNtmDOB6p\nhlRFRc0OZyL2Vq067Sx0KFNKAjwCbElroJ6MbpId7i9KEUCbe8evfL4RH9LXE80a\nYCk/yJowuUO5vsgWK6Q/Br6B+tm0HH3OvKWTwiqdzkkDWHCj9edIHYG/7r04lFvf\nIE6ed7XTP2yvL7mZSr8l7zN51B0b6RzGecawkCeo9ZyNrU9l8SomEVXPKGQnUfeg\nbMgkDXLKHGIFG1RRUvM95YfIqhn7/PRbd5VRk9w1P+Lv/kdzkqwD+9m/CaqKHKBV\noRzC+h8QOcy3kThW7q+ACyz6VhF+1Y6/PNlj2j90XS1YkTo6tAw3bj8iAtYiqBh2\n9y7LiwC9HNxm0eZ0wrI6LZ2Crgk2G0V/fIGSWOBtetqiAGoFhdIF48+IaqGW3Oew\n/ZsazACfHiQXeL1QEYvqitm6XEHkN/hOe5sq4kZBYVPNmH5NgwzV7s5DtDtrZumI\nr+MIdBXwjIoB0BzdSBi6soVIUqMkhF7TAfZP9M9BLJoZuWtHN0GIztUtAGIA6aGS\nMVoSnjtZPB4Os78YZCtOWDQNviK9jolpCO25AgEiU7gb1Ml6BGNFsAqAcg33gbYt\n9+K2j4IIKj5XvakLE6DPrikt4PCe5mKU6r2KJ2dqALZshNXBT6aqF7Jrz63a+tzh\ni6fCgmYAgGnHr3pCIH5EUSUCAwEAAQ==\n-----END PUBLIC KEY-----\n",
+            "rsa_bits": 4096
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "private_key_openssh"
+              }
+            ],
+            [
+              {
+                "type": "get_attr",
+                "value": "private_key_pem"
+              }
+            ],
+            [
+              {
+                "type": "get_attr",
+                "value": "private_key_pem_pkcs8"
+              }
+            ]
+          ],
+          "identity_schema_version": 0
+        }
+      ]
+    }
+  ],
+  "check_results": [
+    {
+      "object_kind": "var",
+      "config_addr": "var.ubuntu_version",
+      "status": "pass",
+      "objects": [
+        {
+          "object_addr": "var.ubuntu_version",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "object_kind": "var",
+      "config_addr": "var.gigamon_version",
+      "status": "pass",
+      "objects": [
+        {
+          "object_addr": "var.gigamon_version",
+          "status": "pass"
+        }
+      ]
+    }
+  ]
+}

@@ -2,20 +2,25 @@
 import subprocess
 import sys
 import concurrent.futures
+import os
+import shutil
+
+# Resolve az command path for cross-platform compatibility (especially Windows .cmd wrappers)
+AZ_CMD = shutil.which("az") or ("az.cmd" if os.name == "nt" else "az")
 
 def check_vm(rg_name, display_name, vm_name, vm_type="linux"):
     if vm_type == "appliance":
         # Proprietary NVAs block the Azure RunCommand extension.
         # We query the Azure Fabric directly for their PowerState instead.
         cmd = [
-            "az", "vm", "get-instance-view",
+            AZ_CMD, "vm", "get-instance-view",
             "--name", vm_name,
             "-g", rg_name,
             "--query", "instanceView.statuses[?starts_with(code, 'PowerState/')].displayStatus",
             "-o", "tsv"
         ]
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60, shell=(os.name == 'nt'))
             if res.returncode == 0 and "VM running" in res.stdout:
                 return display_name, True, "FABRIC OK", "APPLIANCE"
             else:
@@ -36,7 +41,7 @@ def check_vm(rg_name, display_name, vm_name, vm_type="linux"):
     )
     
     cmd = [
-        "az", "vm", "run-command", "invoke",
+        AZ_CMD, "vm", "run-command", "invoke",
         "--command-id", "RunShellScript",
         "--name", vm_name,
         "-g", rg_name,
@@ -46,7 +51,7 @@ def check_vm(rg_name, display_name, vm_name, vm_type="linux"):
     ]
     
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=120, shell=(os.name == 'nt'))
         if res.returncode != 0:
             return display_name, False, "UNREACHABLE", "UNREACHABLE"
     except subprocess.TimeoutExpired:

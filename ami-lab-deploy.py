@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 import sys
+import hashlib
+import shutil
+
 
 # Ensure that the script is run using the Python 3 interpreter
 if sys.version_info.major < 3:
@@ -223,16 +226,142 @@ def fetch_and_fix_ssh_key():
     except Exception as e:
         print(f"[!] Warning: Could not lock down permissions on {key_file}: {e}")
 
+def check_mgmt_ip_warning():
+    """Warns the user if management access is wide-open (*)."""
+    mgmt_ip = "*"
+    if os.path.exists("variables.tf"):
+        try:
+            with open("variables.tf", "r") as f:
+                content = f.read()
+                # Look for variable "allowed_mgmt_ip" default
+                match = re.search(r'variable\s+"allowed_mgmt_ip"\s+\{[^}]*default\s*=\s*"([^"]+)"', content, re.DOTALL)
+                if match:
+                    mgmt_ip = match.group(1)
+        except Exception:
+            pass
+            
+    if mgmt_ip == "*":
+        print("\n" + "#"*80)
+        print("[WARNING] SECURITY NOTICE: Management access is set to wide-open ('*')!")
+        print("          This exposes management ports (SSH, GigaVUE-FM, ntopng, Kibana)")
+        print("          to the entire internet. For production or secure deployments,")
+        print("          please change 'allowed_mgmt_ip' to 'dynamic' or a specific CIDR.")
+        print("#"*80 + "\n")
+
+def bootstrap_remote_state():
+    """Ensures that the resource group and storage account for Terraform remote state exist in Azure."""
+    az_cmd = shutil.which("az") or ("az.cmd" if os.name == 'nt' else "az")
+    
+    # 1. Fetch current subscription ID
+    print("[*] Fetching subscription details from Azure CLI...")
+    res = subprocess.run([az_cmd, "account", "show", "--query", "id", "-o", "tsv"], capture_output=True, text=True, shell=(os.name == 'nt'))
+    if res.returncode != 0:
+        print("[!] Error: You must be logged into Azure CLI ('az login') to manage remote state.")
+        sys.exit(1)
+        
+    sub_id = res.stdout.strip()
+    if not sub_id:
+        print("[!] Error: Could not retrieve active subscription ID.")
+        sys.exit(1)
+        
+    # Resolve Azure Region (Location), Owner, and Project from variables.tf for tagging
+    location = "uksouth"
+    email = "pete.connolly@gigamon.com"
+    project = "connolly-transitory-demo-tf-3po"
+    if os.path.exists("variables.tf"):
+        try:
+            with open("variables.tf", "r") as f:
+                content = f.read()
+                match_loc = re.search(r'variable\s+"location"\s+\{[^}]*default\s*=\s*"([^"]+)"', content, re.DOTALL)
+                if match_loc:
+                    location = match_loc.group(1)
+                match_email = re.search(r'variable\s+"gigamon_email"\s+\{[^}]*default\s*=\s*"([^"]+)"', content, re.DOTALL)
+                if match_email:
+                    email = match_email.group(1)
+                match_project = re.search(r'variable\s+"project_name"\s+\{[^}]*default\s*=\s*"([^"]+)"', content, re.DOTALL)
+                if match_project:
+                    project = match_project.group(1)
+        except Exception:
+            pass
+
+    # Generate unique 24-character storage account name
+    # "tfstate" (7 chars) + md5 hash of sub_id (12 chars) = 19 chars (safe and globally unique)
+    h = hashlib.md5((sub_id + project).encode('utf-8')).hexdigest()[:12]
+    storage_account_name = f"tfstate{h}"
+    rg_name = f"{project}-tfstate-rg"
+    container_name = "tfstate"
+    key_name = "azure-lab.terraform.tfstate"
+
+    tags_arg = [
+        "--tags",
+        f"owner={email}",
+        f"Project={project}",
+        "Environment=demo",
+        "hours needed=8",
+        "DeploymentType=connolly-demo"
+    ]
+
+    # 2. Check if Resource Group exists, create if not
+    print(f"[*] Ensuring Resource Group '{rg_name}' exists in region '{location}'...")
+    res_rg = subprocess.run([az_cmd, "group", "exists", "--name", rg_name], capture_output=True, text=True, shell=(os.name == 'nt'))
+    if res_rg.stdout.strip() != "true":
+        print(f"[*] Resource Group '{rg_name}' not found. Creating with mandatory tags...")
+        subprocess.run([az_cmd, "group", "create", "--name", rg_name, "--location", location] + tags_arg, shell=(os.name == 'nt'), check=True)
+    else:
+        print(f"[+] Resource Group '{rg_name}' exists.")
+
+    # 3. Check if Storage Account exists, create if not
+    print(f"[*] Ensuring Storage Account '{storage_account_name}' exists...")
+    res_sa = subprocess.run([az_cmd, "storage", "account", "show", "--name", storage_account_name, "--resource-group", rg_name], capture_output=True, text=True, shell=(os.name == 'nt'))
+    if res_sa.returncode != 0:
+        print(f"[*] Storage Account '{storage_account_name}' not found. Creating with mandatory tags (this might take 30s)...")
+        subprocess.run([
+            az_cmd, "storage", "account", "create",
+            "--name", storage_account_name,
+            "--resource-group", rg_name,
+            "--location", location,
+            "--sku", "Standard_LRS",
+            "--encryption-services", "blob"
+        ] + tags_arg, shell=(os.name == 'nt'), check=True)
+    else:
+        print(f"[+] Storage Account '{storage_account_name}' exists.")
+
+    # 4. Ensure container exists
+    print(f"[*] Ensuring blob container '{container_name}' exists...")
+    subprocess.run([
+        az_cmd, "storage", "container", "create",
+        "--name", container_name,
+        "--account-name", storage_account_name
+    ], shell=(os.name == 'nt'), capture_output=True)
+    
+    print("[+] Remote state backend bootstrap complete.")
+    return rg_name, storage_account_name, container_name, key_name
+
 def main():
     print("===========================================================")
     print(" Azure Lab 6.1x - Gigamon V Series Deployment Wrapper v1.0 ")
     print("===========================================================")
     
+    # Check management IP security warning
+    check_mgmt_ip_warning()
+    
     # 1. Check dependencies
     check_dependencies()
     
-    # 2. Initialize Terraform
-    run_command(["terraform", "init"])
+    # 2. Bootstrap Azure Remote State Backend
+    print("[*] Bootstrapping remote state backend...")
+    rg_name, sa_name, container_name, key_name = bootstrap_remote_state()
+    
+    # 3. Initialize Terraform with Remote Backend
+    print("[*] Initializing Terraform with remote state storage...")
+    run_command([
+        "terraform", "init",
+        "-reconfigure",
+        f"-backend-config=resource_group_name={rg_name}",
+        f"-backend-config=storage_account_name={sa_name}",
+        f"-backend-config=container_name={container_name}",
+        f"-backend-config=key={key_name}"
+    ])
     
     # 3. Check UCT-V Debian package existence (moved after init to check blob storage)
     check_uctv_deb()
