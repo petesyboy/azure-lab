@@ -38,14 +38,29 @@ resource "azurerm_network_interface" "nic2" {
   }
 }
 
+# Optional third NIC for data-plane traffic
+resource "azurerm_network_interface" "nic3" {
+  count               = var.create_third_nic ? 1 : 0
+  name                = var.third_nic_name
+  resource_group_name = var.resource_group_name
+  location            = var.location
+
+  ip_configuration {
+    name                          = "ipconfig-third"
+    subnet_id                     = var.third_subnet_id
+    private_ip_address_allocation = "Dynamic"
+  }
+}
+
 resource "azurerm_virtual_machine" "vm" {
   name                = var.vm_name
   location            = var.location
   resource_group_name = var.resource_group_name
-  network_interface_ids = var.create_secondary_nic ? [
-    azurerm_network_interface.nic.id,
-    azurerm_network_interface.nic2[0].id
-  ] : [azurerm_network_interface.nic.id]
+  network_interface_ids = concat(
+    [azurerm_network_interface.nic.id],
+    var.create_secondary_nic ? [azurerm_network_interface.nic2[0].id] : [],
+    var.create_third_nic ? [azurerm_network_interface.nic3[0].id] : []
+  )
   primary_network_interface_id = azurerm_network_interface.nic.id
   vm_size = var.vm_size
 

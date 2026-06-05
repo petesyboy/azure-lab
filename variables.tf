@@ -88,6 +88,11 @@ variable "vseries_vm_size" {
   default = "Standard_D4s_v5" # Adjust based on throughput requirements
 }
 
+variable "amx_vm_size" {
+  type    = string
+  default = "Standard_D4s_v5" # AMX node needs a VM size supporting at least 3 NICs (e.g. Standard_D4s_v5)
+}
+
 variable "ubuntu_vm_size" {
   type    = string
   default = "Standard_B2s" # Burstable series suitable for low-traffic tests

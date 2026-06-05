@@ -34,44 +34,36 @@ az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-s
 
 ## Architecture Overview
 
-```text
-                  +------------------------+
-                  |   Production Systems   |
-                  | (UCT-V Agent Workloads) |
-                  +-----------+------------+
-                              |
-                              | [Mirrored Traffic]
-                              v
-                  +------------------------+
-                  |     v-Series Node      |
-                  |  (Traffic Processing)  |
-                  +-----+------------+-----+
-                        |            |
-         [Raw VXLAN]    |            | [Mirrored Traffic]
-         +--------------+            +--------------+
-         |                                          |
-         v                                          v
-+------------------+                       +------------------+
-|     Tool VM      |                       |      AMI VM      |
-| (Raw Packet Dump |                       |   (Transformed   |
-|   via tcpdump)   |                       |   to Metadata)   |
-+------------------+                       +--------+---------+
-                                                    |
-                                                    | [AMI Metadata]
-                                                    v
-                                           +------------------+
-                                           |    AMX Server    |
-                                           |  (Converted to   |
-                                           |   JSON / CEF)    |
-                                           +--------+---------+
-                                                    |
-                                                    | [JSON/CEF over UDP]
-                                                    v
-                                           +------------------+
-                                           |    Cloud Tool    |
-                                           | (Logstash/Elastic|
-                                           |    on Tool VM)   |
-                                           +------------------+
+```mermaid
+graph TD
+    %% Styling
+    classDef prod fill:#2563eb,stroke:#3b82f6,stroke-width:2px,color:#ffffff;
+    classDef vis fill:#1f2937,stroke:#4b5563,stroke-width:2px,color:#f3f4f6;
+
+    subgraph Production Subnet
+        Prod["Production Systems<br>(UCT-V Agent Workloads)"]:::prod
+    end
+
+    subgraph Visibility Subnet
+        vSeries["v-Series Node<br>(Traffic Processing)"]:::vis
+        
+        Tool["Tool VM<br>(Raw Packet Dump & Traffic Analysis via ntopng)"]:::vis
+        
+        AMI["AMI VM<br>(Transformed to Metadata as CEF)"]:::vis
+        AMX["AMX Server<br>(Converted to JSON)"]:::vis
+        CloudTool["Cloud Tool<br>(Logstash/Elastic on Tool VM or Cribl Cloud)"]:::vis
+    end
+
+    %% Flow Paths
+    Prod -->|Mirrored Traffic| vSeries
+    
+    %% Branch A: Raw Packets
+    vSeries -->|Branch A: Raw VXLAN| Tool
+    
+    %% Branch B: Metadata Pipeline
+    vSeries -->|Branch B: Mirrored Traffic| AMI
+    AMI -->|AMI Metadata| AMX
+    AMX -->|JSON/CEF over UDP| CloudTool
 ```
 
 - **Networking**: Single VNet with two subnets (Visibility and Production).

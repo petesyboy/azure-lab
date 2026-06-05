@@ -115,6 +115,24 @@ variable "create_secondary_nic" {
   description = "Set to true to create a second NIC. Required because count cannot depend on computed values like subnet IDs."
 }
 
+variable "third_subnet_id" {
+  type        = string
+  default     = ""
+  description = "Optional subnet ID for a third NIC. If empty, no third NIC is created."
+}
+
+variable "third_nic_name" {
+  type        = string
+  default     = ""
+  description = "Name for the optional third NIC."
+}
+
+variable "create_third_nic" {
+  type        = bool
+  default     = false
+  description = "Set to true to create a third NIC."
+}
+
 variable "data_disks" {
   type = list(object({
     lun               = number

@@ -345,7 +345,7 @@ module "amx" {
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
   subnet_id           = module.networking.visibility_subnet_id # Deployed in Visibility Subnet
-  vm_size             = var.vseries_vm_size
+  vm_size             = var.amx_vm_size
   admin_username      = var.admin_username
   ssh_public_key      = tls_private_key.lab_key.public_key_openssh
   image_publisher     = var.gigamon_image_publisher
@@ -365,6 +365,11 @@ module "amx" {
   secondary_subnet_id  = module.networking.production_subnet_id
   secondary_nic_name   = "nic-amx-data"
   create_secondary_nic = true
+
+  # Third NIC for data-plane (connects to production subnet)
+  third_subnet_id      = module.networking.production_subnet_id
+  third_nic_name       = "nic-amx-data2"
+  create_third_nic     = true
 }
 
 # Cloud-init scripts for all VMs are defined in locals.tf
