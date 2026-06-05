@@ -524,21 +524,11 @@ locals {
           [Service]
           Type=simple
           ExecStart=/usr/local/bin/generate_web_traffic.sh
-
-      - path: /etc/systemd/system/web-traffic.timer
-        permissions: '0644'
-        owner: root:root
-        content: |
-          [Unit]
-          Description=Periodically run Automated Web Traffic Generator
-
-          [Timer]
-          OnBootSec=2m
-          OnUnitActiveSec=5m
-          AccuracySec=1s
+          Restart=always
+          RestartSec=5
 
           [Install]
-          WantedBy=timers.target
+          WantedBy=multi-user.target
 
       - path: /usr/local/bin/start_nc_listener.sh
         permissions: '0755'
@@ -562,7 +552,7 @@ locals {
 %{for cmd in local.agent_standard_runcmd~}
       - ${cmd}
 %{endfor~}
-      - systemctl enable --now web-traffic.timer
+      - systemctl enable --now web-traffic.service
   EOF
   , "\r", "")
 
@@ -677,21 +667,11 @@ locals {
           [Service]
           Type=simple
           ExecStart=/usr/local/bin/generate_web_traffic.sh
-
-      - path: /etc/systemd/system/web-traffic.timer
-        permissions: '0644'
-        owner: root:root
-        content: |
-          [Unit]
-          Description=Periodically run Automated Web Traffic Generator
-
-          [Timer]
-          OnBootSec=2m
-          OnUnitActiveSec=5m
-          AccuracySec=1s
+          Restart=always
+          RestartSec=5
 
           [Install]
-          WantedBy=timers.target
+          WantedBy=multi-user.target
 
       - path: /usr/local/bin/start_nc_listener.sh
         permissions: '0755'
@@ -715,7 +695,7 @@ locals {
 %{for cmd in local.agent_standard_runcmd~}
       - ${cmd}
 %{endfor~}
-      - systemctl enable --now web-traffic.timer
+      - systemctl enable --now web-traffic.service
   EOF
   , "\r", "")
 }

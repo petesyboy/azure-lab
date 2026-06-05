@@ -66,26 +66,29 @@ WEBSITES=(
 echo "=========================================================="
 echo " Generating Web Traffic (Staggered with DNS Resolution)"
 echo "=========================================================="
-for site in "${WEBSITES[@]}"; do
-  # Generate a random delay between 1 and 500 ms
-  DELAY=$(printf "0.%03d" $(( (RANDOM % 500) + 1 )))
-  
-  echo "[*] Waiting ${DELAY}s..."
-  sleep "$DELAY"
+while true; do
+  for site in "${WEBSITES[@]}"; do
+    # Generate a random delay between 1 and 500 ms
+    DELAY=$(printf "0.%03d" $(( (RANDOM % 500) + 1 )))
+    
+    echo "[*] Waiting ${DELAY}s..."
+    sleep "$DELAY"
 
-  echo -n "[*] Resolving ${site}... "
-  # Try dig first for cleaner output, fallback to getent if dig is missing
-  if command -v dig &> /dev/null; then
-    dig +short "$site" | grep -E '^[0-9.]+$' | head -n 1 || echo "No IPv4 found"
-  else
-    getent hosts "$site" | awk '{ print $1 }' | head -n 1 || echo "Failed to resolve"
-  fi
+    echo -n "[*] Resolving ${site}... "
+    # Try dig first for cleaner output, fallback to getent if dig is missing
+    if command -v dig &> /dev/null; then
+      dig +short "$site" | grep -E '^[0-9.]+$' | head -n 1 || echo "No IPv4 found"
+    else
+      getent hosts "$site" | awk '{ print $1 }' | head -n 1 || echo "Failed to resolve"
+    fi
 
-  echo -n "[*] Fetching https://${site} ... "
+    echo -n "[*] Fetching https://${site} ... "
+    
+    # -L follows redirects, -s silences progress, -w prints HTTP status, -o discards body
+    # --max-time ensures we don't hang indefinitely on a slow or unresponsive site
+    curl -L -s -o /dev/null -w "HTTP Status: %{http_code}\n" --max-time 5 "https://${site}" || echo "Connection Failed"
+  done
   
-  # -L follows redirects, -s silences progress, -w prints HTTP status, -o discards body
-  # --max-time ensures we don't hang indefinitely on a slow or unresponsive site
-  curl -L -s -o /dev/null -w "HTTP Status: %{http_code}\n" --max-time 5 "https://${site}" || echo "Connection Failed"
+  echo -e "\nWorkload loop complete. Sleeping 10 seconds before restarting..."
+  sleep 10
 done
-
-echo -e "\nWorkload generation complete!"
