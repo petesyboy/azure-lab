@@ -171,9 +171,7 @@ locals {
   agent_standard_runcmd = [
     "systemctl daemon-reload",
     "systemctl enable --now fm-token-fetch.timer",
-    "systemctl start fm-token-fetch.service",
     "systemctl enable --now gigamon-agent-refresh.path",
-    "systemctl start gigamon-agent-refresh.service",
     "if [ -f /var/run/reboot-required ]; then reboot; fi"
   ]
 
@@ -276,6 +274,8 @@ locals {
       - curl
       - jq
       - apt-transport-https
+      - build-essential
+      - libpcap-dev
 
     write_files:
       # Script to configure VXLAN interface
@@ -326,6 +326,10 @@ locals {
       - ${tls_private_key.lab_key.public_key_openssh}
 
     runcmd:
+      # Compile and install latest tcpreplay from source
+      - wget -q https://github.com/appneta/tcpreplay/releases/download/v4.5.2/tcpreplay-4.5.2.tar.gz -O /tmp/tcpreplay.tar.gz
+      - tar -zxf /tmp/tcpreplay.tar.gz -C /tmp
+      - cd /tmp/tcpreplay-4.5.2 && ./configure && make -j4 && make install
       # --- VXLAN & ntopng Setup ---
       - systemctl daemon-reload
       - systemctl enable vxlan0.service
@@ -371,13 +375,13 @@ locals {
         elasticsearch.hosts: ["http://localhost:9200"]
         KIBANA_CONF
       
-      # Configure Logstash to receive AMI records (JSON over UDP 1514)
+      # Configure Logstash to receive AMI records (CEF over UDP 1514)
       - |
         cat << 'LOGSTASH_CONF' > /etc/logstash/conf.d/ami.conf
         input {
           udp {
             port => 1514
-            codec => json
+            codec => cef
           }
         }
         output {
@@ -417,7 +421,8 @@ locals {
       - iperf3
       - curl
       - jq
-      - tcpreplay
+      - build-essential
+      - libpcap-dev
 
     write_files:
       # UCT-V Agent Config Placeholder
@@ -549,6 +554,10 @@ locals {
       - ${tls_private_key.lab_key.public_key_openssh}
 
     runcmd:
+      # Compile and install latest tcpreplay from source
+      - wget -q https://github.com/appneta/tcpreplay/releases/download/v4.5.2/tcpreplay-4.5.2.tar.gz -O /tmp/tcpreplay.tar.gz
+      - tar -zxf /tmp/tcpreplay.tar.gz -C /tmp
+      - cd /tmp/tcpreplay-4.5.2 && ./configure && make -j4 && make install
       - /usr/local/sbin/download-uctv.sh
 %{for cmd in local.agent_standard_runcmd~}
       - ${cmd}
@@ -565,7 +574,8 @@ locals {
       - iperf3
       - curl
       - jq
-      - tcpreplay
+      - build-essential
+      - libpcap-dev
 
     write_files:
       # UCT-V Agent Config Placeholder
@@ -697,6 +707,10 @@ locals {
       - ${tls_private_key.lab_key.public_key_openssh}
 
     runcmd:
+      # Compile and install latest tcpreplay from source
+      - wget -q https://github.com/appneta/tcpreplay/releases/download/v4.5.2/tcpreplay-4.5.2.tar.gz -O /tmp/tcpreplay.tar.gz
+      - tar -zxf /tmp/tcpreplay.tar.gz -C /tmp
+      - cd /tmp/tcpreplay-4.5.2 && ./configure && make -j4 && make install
       - /usr/local/sbin/download-uctv.sh
 %{for cmd in local.agent_standard_runcmd~}
       - ${cmd}
