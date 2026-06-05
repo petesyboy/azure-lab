@@ -33,6 +33,47 @@ az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-s
 ```
 
 ## Architecture Overview
+
+```text
+                  +------------------------+
+                  |   Production Systems   |
+                  | (UCT-V Agent Workloads) |
+                  +-----------+------------+
+                              |
+                              | [Mirrored Traffic]
+                              v
+                  +------------------------+
+                  |     v-Series Node      |
+                  |  (Traffic Processing)  |
+                  +-----+------------+-----+
+                        |            |
+         [Raw VXLAN]    |            | [Mirrored Traffic]
+         +--------------+            +--------------+
+         |                                          |
+         v                                          v
++------------------+                       +------------------+
+|     Tool VM      |                       |      AMI VM      |
+| (Raw Packet Dump |                       |   (Transformed   |
+|   via tcpdump)   |                       |   to Metadata)   |
++------------------+                       +--------+---------+
+                                                    |
+                                                    | [AMI Metadata]
+                                                    v
+                                           +------------------+
+                                           |    AMX Server    |
+                                           |  (Converted to   |
+                                           |   JSON / CEF)    |
+                                           +--------+---------+
+                                                    |
+                                                    | [JSON/CEF over UDP]
+                                                    v
+                                           +------------------+
+                                           |    Cloud Tool    |
+                                           | (Logstash/Elastic|
+                                           |    on Tool VM)   |
+                                           +------------------+
+```
+
 - **Networking**: Single VNet with two subnets (Visibility and Production).
 - **Gigamon Fabric**: GigaVUE-FM (Management), UCT-V Controller (Tap Management), vSeries & AMX Nodes (Traffic Processing).
 - **Workloads**: 
