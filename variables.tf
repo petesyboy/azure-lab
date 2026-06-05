@@ -53,6 +53,18 @@ variable "fm_subgroup_name" {
   default     = "Azure-3PO-Connection"
 }
 
+variable "amx_fm_group_name" {
+  type        = string
+  description = "Monitoring Domain (Group) name to create on FM for AMX."
+  default     = "Azure-3PO-AMX"
+}
+
+variable "amx_fm_subgroup_name" {
+  type        = string
+  description = "Connection (Sub-Group) name to create on FM for AMX."
+  default     = "Azure-3PO-AMX-Connection"
+}
+
 # -----------------------------------------------------------------------------
 # General VM Configuration
 # -----------------------------------------------------------------------------
@@ -90,7 +102,7 @@ variable "vseries_vm_size" {
 
 variable "amx_vm_size" {
   type    = string
-  default = "Standard_D4s_v5" # AMX node needs a VM size supporting at least 3 NICs (e.g. Standard_D4s_v5)
+  default = "Standard_D8s_v5" # AMX node needs a VM size supporting at least 3 NICs (e.g. Standard_D8s_v5)
 }
 
 variable "ubuntu_vm_size" {

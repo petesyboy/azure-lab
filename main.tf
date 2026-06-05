@@ -352,7 +352,7 @@ module "amx" {
   image_offer         = var.gigamon_image_offer
   image_sku           = local.vseries_image_sku
   image_version       = local.vseries_image_version
-  custom_data         = local.vseries_cloud_init # Shares identical cloud-init with vSeries
+  custom_data         = local.amx_cloud_init
   os_disk_name        = "osdisk-amx"
   pip_name            = "pip-amx"
   nic_name            = "nic-amx-mgmt"
@@ -498,6 +498,8 @@ resource "local_file" "configure_script" {
   content = templatefile("${path.module}/scripts/configure_lab.py.tftpl", {
     fm_group             = var.fm_group_name
     fm_subgroup          = var.fm_subgroup_name
+    amx_fm_group         = var.amx_fm_group_name
+    amx_fm_subgroup      = var.amx_fm_subgroup_name
     admin_username       = var.admin_username
     fm_fqdn              = module.fm.public_ip
     vseries_fqdn         = module.vseries.public_ip

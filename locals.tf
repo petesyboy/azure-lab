@@ -263,6 +263,94 @@ locals {
   EOF
   , "\r", "")
 
+  # AMX Cloud-Init (decoupled from vSeries)
+  amx_cloud_init = replace(<<-EOF
+    #cloud-config
+    write_files:
+      - path: /etc/gigamon-cloud.conf
+        permissions: '0644'
+        owner: root:root
+        content: |
+          Registration:
+            groupName: ${var.amx_fm_group_name}
+            subGroupName: ${var.amx_fm_subgroup_name}
+            token: PLACEHOLDER_TOKEN
+            remoteAddress: ${module.fm.private_ip}
+            remotePort: 443
+
+      - path: /usr/local/sbin/fetch-fm-token-from-keyvault.sh
+        permissions: '0755'
+        owner: root:root
+        content: ${jsonencode(local.shared_token_fetch_script)}
+
+      - path: /etc/systemd/system/fm-token-fetch.service
+        permissions: '0644'
+        owner: root:root
+        content: |
+          [Unit]
+          Description=Fetch FM token from Azure Key Vault
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/fetch-fm-token-from-keyvault.sh
+
+      - path: /etc/systemd/system/fm-token-fetch.timer
+        permissions: '0644'
+        owner: root:root
+        content: |
+          [Unit]
+          Description=Periodically fetch FM token from Azure Key Vault
+
+          [Timer]
+          OnBootSec=30s
+          OnUnitActiveSec=60s
+          RandomizedDelaySec=15s
+
+          [Install]
+          WantedBy=timers.target
+
+      - path: /usr/local/sbin/gigamon-agent-refresh.sh
+        permissions: '0755'
+        owner: root:root
+        content: ${jsonencode(local.shared_agent_refresh_script)}
+
+      - path: /etc/systemd/system/gigamon-agent-refresh.service
+        permissions: '0644'
+        owner: root:root
+        content: |
+          [Unit]
+          Description=Refresh Gigamon agent after config change
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/gigamon-agent-refresh.sh
+
+      - path: /etc/systemd/system/gigamon-agent-refresh.path
+        permissions: '0644'
+        owner: root:root
+        content: |
+          [Unit]
+          Description=Watch /etc/gigamon-cloud.conf for changes
+
+          [Path]
+          PathChanged=/etc/gigamon-cloud.conf
+          Unit=gigamon-agent-refresh.service
+
+          [Install]
+          WantedBy=multi-user.target
+
+    runcmd:
+      - echo "AMX Node initialized. Waiting for configuration..."
+%{for cmd in local.agent_standard_runcmd~}
+      - ${cmd}
+%{endfor~}
+  EOF
+  , "\r", "")
+
   # Tool VM: ntopng + VXLAN termination + ELK Stack
   # Deployed in Visibility Subnet
   tool_vm_cloud_init = replace(<<-EOF
@@ -274,8 +362,7 @@ locals {
       - curl
       - jq
       - apt-transport-https
-      - build-essential
-      - libpcap-dev
+      - tcpreplay
 
     write_files:
       # Script to configure VXLAN interface
@@ -326,10 +413,6 @@ locals {
       - ${tls_private_key.lab_key.public_key_openssh}
 
     runcmd:
-      # Compile and install latest tcpreplay from source
-      - wget -q https://github.com/appneta/tcpreplay/releases/download/v4.5.2/tcpreplay-4.5.2.tar.gz -O /tmp/tcpreplay.tar.gz
-      - tar -zxf /tmp/tcpreplay.tar.gz -C /tmp
-      - cd /tmp/tcpreplay-4.5.2 && ./configure && make -j4 && make install
       # --- VXLAN & ntopng Setup ---
       - systemctl daemon-reload
       - systemctl enable vxlan0.service
@@ -421,8 +504,7 @@ locals {
       - iperf3
       - curl
       - jq
-      - build-essential
-      - libpcap-dev
+      - tcpreplay
 
     write_files:
       # UCT-V Agent Config Placeholder
@@ -544,10 +626,6 @@ locals {
       - ${tls_private_key.lab_key.public_key_openssh}
 
     runcmd:
-      # Compile and install latest tcpreplay from source
-      - wget -q https://github.com/appneta/tcpreplay/releases/download/v4.5.2/tcpreplay-4.5.2.tar.gz -O /tmp/tcpreplay.tar.gz
-      - tar -zxf /tmp/tcpreplay.tar.gz -C /tmp
-      - cd /tmp/tcpreplay-4.5.2 && ./configure && make -j4 && make install
       - /usr/local/sbin/download-uctv.sh
 %{for cmd in local.agent_standard_runcmd~}
       - ${cmd}
@@ -564,8 +642,7 @@ locals {
       - iperf3
       - curl
       - jq
-      - build-essential
-      - libpcap-dev
+      - tcpreplay
 
     write_files:
       # UCT-V Agent Config Placeholder
@@ -687,10 +764,6 @@ locals {
       - ${tls_private_key.lab_key.public_key_openssh}
 
     runcmd:
-      # Compile and install latest tcpreplay from source
-      - wget -q https://github.com/appneta/tcpreplay/releases/download/v4.5.2/tcpreplay-4.5.2.tar.gz -O /tmp/tcpreplay.tar.gz
-      - tar -zxf /tmp/tcpreplay.tar.gz -C /tmp
-      - cd /tmp/tcpreplay-4.5.2 && ./configure && make -j4 && make install
       - /usr/local/sbin/download-uctv.sh
 %{for cmd in local.agent_standard_runcmd~}
       - ${cmd}

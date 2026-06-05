@@ -20,6 +20,8 @@ FM_URL = f"https://{FM_FQDN}"
 # FM Configuration Defaults
 FM_GROUP = "${fm_group}"
 FM_SUBGROUP = "${fm_subgroup}"
+AMX_FM_GROUP = "${amx_fm_group}"
+AMX_FM_SUBGROUP = "${amx_fm_subgroup}"
 VSERIES_FQDN = "${vseries_fqdn}"
 AMX_FQDN = "${amx_fqdn}"
 UCTV_CONTROLLER_FQDN = "${uctv_controller_fqdn}"
@@ -404,7 +406,7 @@ def create_anycloud_connection(domain_id, connection_alias):
     except Exception as e:
         print(f"Error creating connection: {e}")
 
-def push_node_config(token, fqdn, node_name, service_name, step_label):
+def push_node_config(token, fqdn, node_name, service_name, group_name, subgroup_name, step_label):
     """Pushes the registration token and config to a node via SSH."""
     if not fqdn:
         return
@@ -413,8 +415,8 @@ def push_node_config(token, fqdn, node_name, service_name, step_label):
     print(f"Pushing configuration to {node_name} ({fqdn})...")
     
     config_content = f"""Registration:
-  groupName: {FM_GROUP}
-  subGroupName: {FM_SUBGROUP}
+  groupName: {group_name}
+  subGroupName: {subgroup_name}
   token: {token}
   remoteAddress: {FM_INTERNAL}
   remotePort: 443
@@ -548,6 +550,7 @@ def main():
 
     az_cmd = shutil.which("az") or ("az.cmd" if os.name == 'nt' else "az")
     domain_exists = False
+    amx_domain_exists = False
     token_valid = False
 
     # 1. Try to use an existing token to check if domain is already set up
@@ -569,10 +572,14 @@ def main():
                 data = resp.json()
                 domains = data.get('monitoringDomains', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
                 for d in domains:
-                    if isinstance(d, dict) and d.get('alias') == FM_GROUP:
-                        domain_exists = True
-                        print(f"[*] Monitoring Domain '{FM_GROUP}' already exists.")
-                        break
+                    if isinstance(d, dict):
+                        alias = d.get('alias')
+                        if alias == FM_GROUP:
+                            domain_exists = True
+                            print(f"[*] Monitoring Domain '{FM_GROUP}' already exists.")
+                        elif alias == AMX_FM_GROUP:
+                            amx_domain_exists = True
+                            print(f"[*] Monitoring Domain '{AMX_FM_GROUP}' already exists.")
             elif resp.status_code in [401, 403]:
                 print("[!] Existing token is invalid or expired.")
                 agent_token = None  # Force prompt
@@ -598,33 +605,43 @@ def main():
     print("Configuration Summary")
     print("="*60)
     print(f"  FM:               {FM_URL}")
-    print(f"  Monitoring Domain: {monitoring_domain}")
-    print(f"  Connection:        {subgroup_name}")
+    print(f"  Domain 1 (Main):   {monitoring_domain} ({subgroup_name})")
+    print(f"  Domain 2 (AMX):    {AMX_FM_GROUP} ({AMX_FM_SUBGROUP})")
     print()
 
     # FM API Configuration (Monitoring Domain + Connection)
     print("--- Step 1/1: FM API Configuration ---")
+    
+    # Domain 1: Main
     if domain_exists:
         print(f"Monitoring Domain '{monitoring_domain}' already exists. Skipping creation.")
     else:
         print(f"Creating Monitoring Domain '{monitoring_domain}'...")
-
         domain_id = create_monitoring_domain(monitoring_domain)
-
         if domain_id:
             create_anycloud_connection(domain_id, subgroup_name)
         else:
-            print("\n[WARNING] Monitoring Domain creation failed or skipped.")
-            print("You can retry later once FM is fully initialized.")
+            print(f"\n[WARNING] Monitoring Domain '{monitoring_domain}' creation failed or skipped.")
+
+    # Domain 2: AMX
+    if amx_domain_exists:
+        print(f"Monitoring Domain '{AMX_FM_GROUP}' already exists. Skipping creation.")
+    else:
+        print(f"Creating Monitoring Domain '{AMX_FM_GROUP}'...")
+        amx_domain_id = create_monitoring_domain(AMX_FM_GROUP)
+        if amx_domain_id:
+            create_anycloud_connection(amx_domain_id, AMX_FM_SUBGROUP)
+        else:
+            print(f"\n[WARNING] Monitoring Domain '{AMX_FM_GROUP}' creation failed or skipped.")
 
     # 3. Register the UCTV node via SSH
-    push_node_config(agent_token, UCTV_CONTROLLER_FQDN, "UCTV Controller", "uctv-cntlr", "Step 2/5")
+    push_node_config(agent_token, UCTV_CONTROLLER_FQDN, "UCTV Controller", "uctv-cntlr", FM_GROUP, FM_SUBGROUP, "Step 2/5")
 
     # 4. Register the vSeries node via SSH
-    push_node_config(agent_token, VSERIES_FQDN, "vSeries Node", "vseries-node", "Step 3/5")
+    push_node_config(agent_token, VSERIES_FQDN, "vSeries Node", "vseries-node", FM_GROUP, FM_SUBGROUP, "Step 3/5")
 
     # 5. Register the AMX node via SSH
-    push_node_config(agent_token, AMX_FQDN, "AMX Node", "vseries-node", "Step 4/5")
+    push_node_config(agent_token, AMX_FQDN, "AMX Node", "vseries-node", AMX_FM_GROUP, AMX_FM_SUBGROUP, "Step 4/5")
 
     # 6. Restart the production Ubuntu agents to force immediate registration
     restart_ubuntu_agents()
@@ -633,8 +650,8 @@ def main():
     print("Configuration Complete!")
     print("="*60)
     print(f"  Verify in FM:  {FM_URL}/app/#/cloud/monitoringDomains")
-    print(f"  Domain:        {monitoring_domain}")
-    print(f"  Connection:    {subgroup_name}")
+    print(f"  Domain 1:      {monitoring_domain} ({subgroup_name})")
+    print(f"  Domain 2:      {AMX_FM_GROUP} ({AMX_FM_SUBGROUP})")
     print("\nUCT-V Agent (Workloads) registration: Handled by cloud-init + Key Vault.")
     print("UCT-V Controller registration: Handled by SSH direct push.")
     print("vSeries Node registration: Handled by SSH direct push.")
