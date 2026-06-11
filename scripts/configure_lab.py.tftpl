@@ -407,6 +407,233 @@ def create_anycloud_connection(domain_id, connection_alias):
     except Exception as e:
         print(f"Error creating connection: {e}")
 
+def get_monitoring_domain_id(domain_alias):
+    """Retrieves the ID of an existing Monitoring Domain by alias."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringDomains"
+    try:
+        resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            domains = data.get('monitoringDomains', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            for d in domains:
+                if isinstance(d, dict) and d.get('alias') == domain_alias:
+                    return d.get('id')
+    except Exception as e:
+        print(f"Error retrieving domain ID: {e}")
+    return None
+
+def get_monitoring_session_id(session_alias):
+    """Retrieves the ID of an existing Monitoring Session by alias."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions"
+    try:
+        resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            sessions = data.get('monitoringSessions', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            for s in sessions:
+                if isinstance(s, dict) and s.get('alias') == session_alias:
+                    return s.get('id')
+    except Exception as e:
+        print(f"Error retrieving Monitoring Session ID: {e}")
+    return None
+
+def get_anycloud_connection_id(domain_id):
+    """Retrieves the AnyCloud connection ID associated with a monitoring domain ID."""
+    url = f"{FM_URL}/api/v1.3/cloud/anyCloud/connections"
+    try:
+        resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            conns = data.get('anyCloudConnections', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            for c in conns:
+                if isinstance(c, dict) and c.get('monitoringDomainId') == domain_id:
+                    return c.get('id')
+    except Exception as e:
+        print(f"Error retrieving connection ID: {e}")
+    return None
+
+def create_monitoring_session(domain_id, subgroup_name, session_name):
+    """Creates and configures a virtual monitoring session via FM API."""
+    if not domain_id:
+        print("Skipping Monitoring Session creation (No Domain ID).")
+        return None
+
+    # Retrieve the connection ID for the domain
+    connection_id = get_anycloud_connection_id(domain_id)
+    if not connection_id:
+        print(f"[ERROR] Could not find any connection for Domain ID: {domain_id}")
+        return None
+    print(f"Found AnyCloud Connection ID: {connection_id}")
+
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions"
+
+    # GigaVUE-FM expects Content-Type: application/MonitoringSessionUctV+json for UCT-V sessions
+    headers = {
+        "Content-Type": "application/MonitoringSessionUctV+json",
+        "Accept": "application/json",
+        "Authorization": AUTH_HEADERS.get("Authorization")
+    }
+
+    session_id = None
+
+    # Check if session exists first
+    session_id = get_monitoring_session_id(session_name)
+    if session_id:
+        print(f"Monitoring Session '{session_name}' already exists (ID: {session_id}).")
+    else:
+        print(f"\nCreating Monitoring Session '{session_name}'...")
+        payload = {
+            "alias": session_name,
+            "description": "Session created via configure_lab",
+            "connIds": [connection_id],
+            "platform": "anyCloud"
+        }
+        try:
+            response = requests.post(url, json=payload, headers=headers, verify=False)
+            if response.status_code in [200, 201]:
+                data = response.json()
+                session_id = data.get("id")
+                print(f"Successfully created Monitoring Session '{session_name}' (ID: {session_id}).")
+            elif response.status_code == 409:
+                print(f"Monitoring Session '{session_name}' already exists.")
+                session_id = get_monitoring_session_id(session_name)
+            else:
+                print(f"Failed to create Monitoring Session. API returned {response.status_code}")
+                print(f"Response: {response.text}")
+                return None
+        except Exception as e:
+            print(f"Error creating Monitoring Session: {e}")
+            return None
+
+    if not session_id:
+        print("[ERROR] No Session ID retrieved.")
+        return None
+
+    # Query the session details to check if maps/raw endpoints are configured
+    try:
+        session_detail_url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}"
+        resp_detail = requests.get(session_detail_url, headers=AUTH_HEADERS, verify=False)
+        if resp_detail.status_code == 200:
+            session_data = resp_detail.json()
+            maps = session_data.get("trafficMaps", [])
+            raw_endpoints = session_data.get("rawEndPoints", [])
+            links = session_data.get("links", [])
+            
+            # Check if already configured
+            has_raw = any(r.get("alias") == "raw_dest" for r in raw_endpoints)
+            has_map = any(m.get("name") == "Pass_All_IPv4" for m in maps)
+            has_link = len(links) > 0
+            
+            if has_raw and has_map and has_link:
+                print("Monitoring Session flow elements (raw destination, traffic map, and link) are already configured.")
+                return session_id
+        else:
+            print(f"Warning: Could not fetch session details. API returned {resp_detail.status_code}")
+    except Exception as e:
+        print(f"Warning: Error querying session details: {e}")
+
+    # Configure session flow elements sequentially
+    update_url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    headers_json = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": AUTH_HEADERS.get("Authorization")
+    }
+
+    try:
+        # Step A: Create Raw Destination Endpoint
+        print("Creating Raw Destination Endpoint...")
+        payload_raw = {
+            "requests": [
+                {
+                    "entityType": "raw",
+                    "operation": "create",
+                    "raw": {
+                        "alias": "raw_dest"
+                    }
+                }
+            ]
+        }
+        resp_raw = requests.post(update_url, json=payload_raw, headers=headers_json, verify=False)
+        if resp_raw.status_code not in [200, 201, 202]:
+            print(f"Failed to create raw endpoint: {resp_raw.text}")
+            return None
+        raw_id = resp_raw.json()["operationResponses"][0]["id"]
+        print(f"Raw Destination Endpoint created successfully (ID: {raw_id}).")
+
+        # Step B: Create Traffic Map (Pass all IPv4)
+        print("Creating Traffic Map (Pass_All_IPv4)...")
+        payload_map = {
+            "requests": [
+                {
+                    "entityType": "trafficMap",
+                    "operation": "create",
+                    "map": {
+                        "name": "Pass_All_IPv4",
+                        "comment": "Pass all IPv4",
+                        "ruleSets": [
+                            {
+                                "ruleSetId": "1",
+                                "priority": 1,
+                                "aepId": 2,
+                                "passRules": [
+                                    {
+                                        "ruleId": 1,
+                                        "matches": [
+                                            {
+                                                "type": "ipVer",
+                                                "value": "v4"
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "dropRules": []
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        resp_map = requests.post(update_url, json=payload_map, headers=headers_json, verify=False)
+        if resp_map.status_code not in [200, 201, 202]:
+            print(f"Failed to create traffic map: {resp_map.text}")
+            return None
+        map_id = resp_map.json()["operationResponses"][0]["id"]
+        print(f"Traffic Map created successfully (ID: {map_id}).")
+
+        # Step C: Link Map to Raw Destination Endpoint
+        print("Linking Traffic Map to Raw Destination Endpoint...")
+        payload_link = {
+            "requests": [
+                {
+                    "entityType": "link",
+                    "operation": "create",
+                    "link": {
+                        "alias": "map_to_raw",
+                        "source": {
+                            "id": map_id,
+                            "type": "map",
+                            "aepId": 2
+                        },
+                        "dest": {
+                            "id": raw_id,
+                            "type": "raw"
+                        }
+                    }
+                }
+            ]
+        }
+        resp_link = requests.post(update_url, json=payload_link, headers=headers_json, verify=False)
+        if resp_link.status_code not in [200, 201, 202]:
+            print(f"Failed to link map to raw destination: {resp_link.text}")
+            return None
+        print("Successfully linked Traffic Map to Raw Destination Endpoint.")
+        return session_id
+
+    except Exception as e:
+        print(f"Error configuring session flow: {e}")
+        return None
+
 def push_node_config(token, fqdn, node_name, service_name, group_name, subgroup_name, step_label):
     """Pushes the registration token and config to a node via SSH."""
     if not fqdn:
@@ -638,6 +865,7 @@ def main():
     # Domain 1: Main
     if domain_exists:
         print(f"Monitoring Domain '{monitoring_domain}' already exists. Skipping creation.")
+        domain_id = get_monitoring_domain_id(monitoring_domain)
     else:
         print(f"Creating Monitoring Domain '{monitoring_domain}'...")
         domain_id = create_monitoring_domain(monitoring_domain)
@@ -649,6 +877,7 @@ def main():
     # Domain 2: AMX
     if amx_domain_exists:
         print(f"Monitoring Domain '{AMX_FM_GROUP}' already exists. Skipping creation.")
+        amx_domain_id = get_monitoring_domain_id(AMX_FM_GROUP)
     else:
         print(f"Creating Monitoring Domain '{AMX_FM_GROUP}'...")
         amx_domain_id = create_monitoring_domain(AMX_FM_GROUP)
@@ -656,6 +885,10 @@ def main():
             create_anycloud_connection(amx_domain_id, AMX_FM_SUBGROUP)
         else:
             print(f"\n[WARNING] Monitoring Domain '{AMX_FM_GROUP}' creation failed or skipped.")
+
+    # Create Monitoring Session for Main Domain
+    if domain_id:
+        create_monitoring_session(domain_id, subgroup_name, "Azure-Lab-Session")
 
     # 3-5. Register the UCTV, vSeries, and AMX nodes in parallel via SSH
     push_all_node_configs(agent_token)

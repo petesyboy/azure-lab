@@ -102,7 +102,7 @@ variable "vseries_vm_size" {
 
 variable "amx_vm_size" {
   type    = string
-  default = "Standard_D4s_v5" # AMX node needs a VM size supporting at least 3 NICs (Standard_D4s_v5 supports up to 4 NICs)
+  default = "Standard_D8s_v5" # AMX node needs a VM size supporting at least 3 NICs (Standard_D8s_v5 supports up to 4 NICs)
 }
 
 variable "ubuntu_vm_size" {
