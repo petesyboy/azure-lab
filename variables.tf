@@ -97,7 +97,7 @@ variable "uctv_vm_size" {
 
 variable "vseries_vm_size" {
   type    = string
-  default = "Standard_D2s_v5" # Adjust based on throughput requirements
+  default = "Standard_D4s_v5" # Adjust based on throughput requirements
 }
 
 variable "amx_vm_size" {
