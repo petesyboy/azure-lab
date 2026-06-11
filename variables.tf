@@ -156,5 +156,5 @@ variable "fm_token_secret_name" {
 variable "allowed_mgmt_ip" {
   type        = string
   description = "The IP address or CIDR range allowed for management access (SSH, HTTPS, HTTP, ntopng UI). Set to '*' to allow access from anywhere, or 'dynamic' to restrict it to your current public IP."
-  default     = "dynamic"
+  default     = "*"
 }
