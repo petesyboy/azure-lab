@@ -7,6 +7,7 @@ import os
 import subprocess
 import shutil
 import argparse
+import concurrent.futures
 
 # Suppress insecure request warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -451,12 +452,30 @@ def push_node_config(token, fqdn, node_name, service_name, group_name, subgroup_
     except Exception as e:
         print(f"  [ERROR] Unhandled exception during SSH: {e}")
 
+def push_all_node_configs(token):
+    """Registers UCTV, vSeries, and AMX nodes in parallel via SSH."""
+    nodes = [
+        (UCTV_CONTROLLER_FQDN, "UCTV Controller", "uctv-cntlr", FM_GROUP, FM_SUBGROUP, "Step 2/5"),
+        (VSERIES_FQDN, "vSeries Node", "vseries-node", FM_GROUP, FM_SUBGROUP, "Step 3/5"),
+        (AMX_FQDN, "AMX Node", "vseries-node", AMX_FM_GROUP, AMX_FM_SUBGROUP, "Step 4/5")
+    ]
+    
+    print("\n--- Registering virtual appliance nodes in parallel via SSH ---")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(nodes)) as executor:
+        futures = [
+            executor.submit(push_node_config, token, fqdn, name, service, grp, subgrp, label)
+            for fqdn, name, service, grp, subgrp, label in nodes
+        ]
+        concurrent.futures.wait(futures)
+
 def restart_ubuntu_agents():
-    """Restarts the UCTV agent on the production Ubuntu VMs via SSH."""
-    print(f"\n--- Step 5/5: Restart Ubuntu UCTV Agents via SSH ---")
-    for fqdn, name in [(PROD1_FQDN, "prod-ubuntu-1"), (PROD2_FQDN, "prod-ubuntu-2")]:
+    """Restarts the UCTV agent on the production Ubuntu VMs via SSH in parallel."""
+    print(f"\n--- Step 5/5: Restart Ubuntu UCTV Agents via SSH in parallel ---")
+    targets = [(PROD1_FQDN, "prod-ubuntu-1"), (PROD2_FQDN, "prod-ubuntu-2")]
+    
+    def restart_one(fqdn, name):
         if not fqdn:
-            continue
+            return
         print(f"Restarting uctv agent daemon on {name} ({fqdn})...")
         ssh_cmd = [
             "ssh", "-i", KEY_FILE, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10",
@@ -470,6 +489,10 @@ def restart_ubuntu_agents():
             print(f"  [WARNING] SSH command timed out on {name}. The agent may still be restarting.")
         except Exception as e:
             print(f"  [WARNING] Could not restart agent on {name}. It may restart automatically later via timer.")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(targets)) as executor:
+        futures = [executor.submit(restart_one, fqdn, name) for fqdn, name in targets]
+        concurrent.futures.wait(futures)
 
 def check_service_status(fqdn, service_name, user=ADMIN_USER):
     """Checks if a systemd service is active on a remote VM via SSH."""
@@ -634,14 +657,8 @@ def main():
         else:
             print(f"\n[WARNING] Monitoring Domain '{AMX_FM_GROUP}' creation failed or skipped.")
 
-    # 3. Register the UCTV node via SSH
-    push_node_config(agent_token, UCTV_CONTROLLER_FQDN, "UCTV Controller", "uctv-cntlr", FM_GROUP, FM_SUBGROUP, "Step 2/5")
-
-    # 4. Register the vSeries node via SSH
-    push_node_config(agent_token, VSERIES_FQDN, "vSeries Node", "vseries-node", FM_GROUP, FM_SUBGROUP, "Step 3/5")
-
-    # 5. Register the AMX node via SSH
-    push_node_config(agent_token, AMX_FQDN, "AMX Node", "vseries-node", AMX_FM_GROUP, AMX_FM_SUBGROUP, "Step 4/5")
+    # 3-5. Register the UCTV, vSeries, and AMX nodes in parallel via SSH
+    push_all_node_configs(agent_token)
 
     # 6. Restart the production Ubuntu agents to force immediate registration
     restart_ubuntu_agents()
