@@ -92,17 +92,17 @@ variable "fm_vm_size" {
 
 variable "uctv_vm_size" {
   type    = string
-  default = "Standard_D4s_v5"
+  default = "Standard_D2s_v5"
 }
 
 variable "vseries_vm_size" {
   type    = string
-  default = "Standard_D4s_v5" # Adjust based on throughput requirements
+  default = "Standard_D2s_v5" # Adjust based on throughput requirements
 }
 
 variable "amx_vm_size" {
   type    = string
-  default = "Standard_D8s_v5" # AMX node needs a VM size supporting at least 3 NICs (e.g. Standard_D8s_v5)
+  default = "Standard_D4s_v5" # AMX node needs a VM size supporting at least 3 NICs (Standard_D4s_v5 supports up to 4 NICs)
 }
 
 variable "ubuntu_vm_size" {
