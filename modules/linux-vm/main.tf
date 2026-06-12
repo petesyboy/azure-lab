@@ -59,9 +59,14 @@ resource "azurerm_linux_virtual_machine" "vm" {
   }
 
   tags = {
-    Role    = var.role_tag
-    owner   = var.owner_email
-    Project = var.project_tag
+    Role           = var.role_tag
+    owner          = var.owner_email
+    Project        = var.project_tag
+    Owner          = "pete.connolly@gigamon.com"
+    Team           = "EMEA-SE"
+    Purpose        = "EMES-SE-Lab"
+    "Hours Needed" = "Always"
+    DO_NOT_DELETE  = "DO_NOT_DELETE"
   }
 }
 
