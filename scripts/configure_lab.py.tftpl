@@ -31,6 +31,8 @@ PROD2_FQDN = "${prod2_fqdn}"
 FM_INTERNAL = "${fm_internal_name}"
 UCTV_INTERNAL = "${uctv_internal_name}"
 TOOL_VM_PRIVATE_IP = "${tool_vm_private_ip}"
+CRIBL_ENDPOINT = "${cribl_endpoint}"
+CRIBL_AUTH_TOKEN = "${cribl_auth_token}"
 ADMIN_USER = "${admin_username}"
 
 # Azure Key Vault (optional convenience for local script)
@@ -712,6 +714,186 @@ def get_monitoring_session_details(session_id):
     return {}
 
 
+def create_raw_endpoint(session_id, alias):
+    """Creates a 'raw' endpoint entity (a physical ingress/egress interface placeholder) on a session."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    payload = {
+        "requests": [
+            {"entityType": "raw", "operation": "create", "raw": {"alias": alias}}
+        ]
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "raw" and op.get("status") == "success":
+                    raw_id = op.get("id")
+                    print(f"Created raw endpoint '{alias}' (ID: {raw_id}).")
+                    return raw_id
+            print(f"[ERROR] Raw endpoint creation did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to create raw endpoint '{alias}'. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error creating raw endpoint '{alias}': {e}")
+    return None
+
+
+def create_session_link(session_id, source_id, source_type, dest_id, dest_type, source_aep_id=None):
+    """Creates a link between two entities (map/raw/tunnel) on a session's canvas."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    payload = {
+        "requests": [
+            {
+                "entityType": "link",
+                "operation": "create",
+                "link": {
+                    "alias": "",
+                    "source": {"id": source_id, "type": source_type, "aepId": source_aep_id},
+                    "dest": {"id": dest_id, "type": dest_type},
+                },
+            }
+        ]
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "link" and op.get("status") == "success":
+                    print(f"Linked {source_type}:{source_id} -> {dest_type}:{dest_id} (Link ID: {op.get('id')}).")
+                    return op.get("id")
+            print(f"[ERROR] Link creation did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to create link. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error creating link: {e}")
+    return None
+
+
+def get_vseries_node_ids(session_id):
+    """Retrieves the vSeries/AMX node IDs currently registered to a monitoring session."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/vseriesNodes"
+    try:
+        resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            nodes = data.get("vseriesNodes", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            return [n.get("nodeId") for n in nodes if isinstance(n, dict) and n.get("nodeId")]
+    except Exception as e:
+        print(f"Error retrieving vSeries node IDs: {e}")
+    return []
+
+
+def set_endpoint_iface_mappings(session_id, vseries_node_id, iface_endpoint_pairs):
+    """Binds raw endpoint entities to physical interfaces on a vSeries/AMX node."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/endpointIfaceMappings"
+    payload = {
+        "monitoringSessionId": session_id,
+        "vseriesEndpointIfaceMappings": [
+            {
+                "vseriesNodeIds": [vseries_node_id],
+                "endpointIfaceMappings": [
+                    {"iface": iface, "endpointId": endpoint_id}
+                    for iface, endpoint_id in iface_endpoint_pairs
+                ],
+            }
+        ],
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            print(f"Bound endpoint interfaces on node {vseries_node_id}: {iface_endpoint_pairs}.")
+            return True
+        print(f"[ERROR] Failed to set endpoint interface mappings. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error setting endpoint interface mappings: {e}")
+    return False
+
+
+def configure_ami_monitoring_session_flow(
+    session_id,
+    map_name="Azure-AMX-Map",
+    ingress_alias="Ingress-Raw-Endpoint",
+    egress_alias="Egress-Raw-Endpoint",
+    ingress_iface="eth1",
+    egress_iface="eth2",
+    aep_id=2,
+):
+    """
+    Builds the Ingress-Raw -> Map -> Egress-Raw flow on the AMX/AMI monitoring
+    session, binds the raw endpoints to the AMX node's physical data interfaces,
+    and deploys it.
+
+    NOTE: This wires up traffic selection and interface binding only. It does
+    NOT yet attach the AMX/AMI ("ogw") GigaSMART app or configure a destination
+    (e.g. Cribl) on the egress side - that piece still needs a captured request
+    from the FM UI (guessing JSON field names against an undocumented schema
+    risks a payload FM silently accepts but never actually exports data from).
+    """
+    if not session_id:
+        print("Skipping AMI monitoring session flow configuration (No Session ID).")
+        return False
+
+    details = get_monitoring_session_details(session_id)
+
+    existing_maps = details.get("trafficMaps") or []
+    if existing_maps:
+        map_id = existing_maps[0].get("id")
+        print(f"Traffic map already on AMI session (ID: {map_id}). Reusing it.")
+    else:
+        map_id = create_traffic_map(session_id, map_name, aep_id=aep_id)
+
+    if not map_id:
+        print("[ERROR] Could not complete AMI monitoring session flow (map creation failed).")
+        return False
+
+    existing_raw = details.get("rawEndPoints") or []
+    ingress_raw = next((r for r in existing_raw if r.get("alias") == ingress_alias), None)
+    egress_raw = next((r for r in existing_raw if r.get("alias") == egress_alias), None)
+
+    ingress_id = ingress_raw.get("id") if ingress_raw else create_raw_endpoint(session_id, ingress_alias)
+    egress_id = egress_raw.get("id") if egress_raw else create_raw_endpoint(session_id, egress_alias)
+    if ingress_raw:
+        print(f"Raw endpoint '{ingress_alias}' already on session (ID: {ingress_id}). Reusing it.")
+    if egress_raw:
+        print(f"Raw endpoint '{egress_alias}' already on session (ID: {egress_id}). Reusing it.")
+
+    if not ingress_id or not egress_id:
+        print("[ERROR] Could not complete AMI monitoring session flow (raw endpoint creation failed).")
+        return False
+
+    existing_links = details.get("links") or []
+    if len(existing_links) >= 2:
+        print("Ingress/egress raw links already on session. Reusing them.")
+    else:
+        if not create_session_link(session_id, ingress_id, "raw", map_id, "map", source_aep_id=None):
+            print("[ERROR] Could not complete AMI monitoring session flow (ingress link creation failed).")
+            return False
+        if not create_session_link(session_id, map_id, "map", egress_id, "raw", source_aep_id=aep_id):
+            print("[ERROR] Could not complete AMI monitoring session flow (egress link creation failed).")
+            return False
+
+    node_ids = get_vseries_node_ids(session_id)
+    if not node_ids:
+        print("[WARNING] No AMX node registered to this session yet - skipping interface binding/deploy for now.")
+        return False
+
+    if not set_endpoint_iface_mappings(
+        session_id, node_ids[0], [(ingress_iface, ingress_id), (egress_iface, egress_id)]
+    ):
+        print("[ERROR] Could not complete AMI monitoring session flow (interface binding failed).")
+        return False
+
+    if details.get("deployed"):
+        print("AMI monitoring session already deployed.")
+    elif not deploy_monitoring_session(session_id):
+        return False
+
+    print("[TODO] AMX/AMI (\"ogw\") GigaSMART app + Cribl destination not yet wired up on the egress endpoint.")
+    return True
+
+
 def configure_monitoring_session_flow(session_id, tool_vm_private_ip, map_name="Azure-Lab-Map", tunnel_alias="NtopNG"):
     """Builds the map -> tunnel flow on an existing (empty) monitoring session and deploys it."""
     if not session_id:
@@ -1013,6 +1195,12 @@ def main():
         session_id = create_monitoring_session(domain_id, subgroup_name, "Azure-Lab-Session")
         if session_id:
             configure_monitoring_session_flow(session_id, TOOL_VM_PRIVATE_IP)
+
+    # Create Monitoring Session for AMX/AMI Domain (customer traffic -> AMI app -> Cribl)
+    if amx_domain_id:
+        ami_session_id = create_monitoring_session(amx_domain_id, AMX_FM_SUBGROUP, "Azure-AMX-Session")
+        if ami_session_id:
+            configure_ami_monitoring_session_flow(ami_session_id)
 
     # 3-5. Register the UCTV, vSeries, and AMX nodes in parallel via SSH
     push_all_node_configs(agent_token)

@@ -65,6 +65,19 @@ variable "amx_fm_subgroup_name" {
   default     = "Azure-3PO-AMX-Connection"
 }
 
+variable "cribl_endpoint" {
+  type        = string
+  description = "Cribl instance endpoint (e.g. HEC-style URL or host:port) that the AMX/AMI GigaSMART app exports metadata to. Leave empty until the destination is wired up."
+  default     = ""
+}
+
+variable "cribl_auth_token" {
+  type        = string
+  description = "Auth token/API key for the Cribl endpoint, if required."
+  default     = ""
+  sensitive   = true
+}
+
 # -----------------------------------------------------------------------------
 # General VM Configuration
 # -----------------------------------------------------------------------------
