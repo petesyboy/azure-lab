@@ -579,6 +579,22 @@ def create_traffic_map(session_id, map_name, aep_id=2):
     return None
 
 
+def get_tunnel_spec_by_alias(tunnel_alias):
+    """Retrieves an existing tunnel spec by alias (tunnel specs are global, not per-session)."""
+    url = f"{FM_URL}/api/v1.3/cloud/tunnelSpecs"
+    try:
+        resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            specs = data.get('tunnelSpecs', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            for s in specs:
+                if isinstance(s, dict) and s.get('alias') == tunnel_alias:
+                    return s
+    except Exception as e:
+        print(f"Error retrieving tunnel spec: {e}")
+    return None
+
+
 def create_vxlan_tunnel(session_id, tunnel_alias, remote_ip, vni=123, dport=4789):
     """Creates a VXLAN tunnel spec and attaches it to the monitoring session canvas."""
     spec_url = f"{FM_URL}/api/v1.3/cloud/tunnelSpecs"
@@ -597,11 +613,19 @@ def create_vxlan_tunnel(session_id, tunnel_alias, remote_ip, vni=123, dport=4789
     }
     try:
         resp = requests.post(spec_url, json=spec_payload, headers=AUTH_HEADERS, verify=False)
-        if resp.status_code not in (200, 201):
+        if resp.status_code in (200, 201):
+            tunnel_spec = resp.json()
+            print(f"Created tunnel spec '{tunnel_alias}' (ID: {tunnel_spec.get('id')}).")
+        elif resp.status_code == 409:
+            # Tunnel specs are global objects and survive session deletion; reuse the existing one.
+            print(f"Tunnel spec '{tunnel_alias}' already exists. Reusing it.")
+            tunnel_spec = get_tunnel_spec_by_alias(tunnel_alias)
+            if not tunnel_spec:
+                print(f"[ERROR] Tunnel spec '{tunnel_alias}' exists but could not be retrieved.")
+                return None
+        else:
             print(f"[ERROR] Failed to create tunnel spec. API returned {resp.status_code}: {resp.text}")
             return None
-        tunnel_spec = resp.json()
-        print(f"Created tunnel spec '{tunnel_alias}' (ID: {tunnel_spec.get('id')}).")
     except Exception as e:
         print(f"Error creating tunnel spec: {e}")
         return None
@@ -697,23 +721,38 @@ def configure_monitoring_session_flow(session_id, tool_vm_private_ip, map_name="
         print("Skipping monitoring session flow configuration (No Tool VM private IP).")
         return False
 
+    # Resume from whatever partial state the session is in (map/tunnel/link may
+    # each already exist from a previous run).
     details = get_monitoring_session_details(session_id)
-    if details.get("trafficMaps") or details.get("tunnels"):
-        print(f"Monitoring session '{session_id}' already has a map/tunnel flow configured. Skipping.")
-        if not details.get("deployed"):
-            return deploy_monitoring_session(session_id)
-        return True
 
-    map_id = create_traffic_map(session_id, map_name)
-    tunnel_id = create_vxlan_tunnel(session_id, tunnel_alias, tool_vm_private_ip)
+    existing_maps = details.get("trafficMaps") or []
+    if existing_maps:
+        map_id = existing_maps[0].get("id")
+        print(f"Traffic map already on session (ID: {map_id}). Reusing it.")
+    else:
+        map_id = create_traffic_map(session_id, map_name)
+
+    existing_tunnels = details.get("tunnels") or []
+    if existing_tunnels:
+        tunnel_id = existing_tunnels[0].get("id")
+        print(f"Tunnel already on session (ID: {tunnel_id}). Reusing it.")
+    else:
+        tunnel_id = create_vxlan_tunnel(session_id, tunnel_alias, tool_vm_private_ip)
+
     if not map_id or not tunnel_id:
         print("[ERROR] Could not complete monitoring session flow (map/tunnel creation failed).")
         return False
 
-    if not link_map_to_tunnel(session_id, map_id, tunnel_id):
+    existing_links = details.get("links") or []
+    if existing_links:
+        print("Map-to-tunnel link already on session. Reusing it.")
+    elif not link_map_to_tunnel(session_id, map_id, tunnel_id):
         print("[ERROR] Could not complete monitoring session flow (link creation failed).")
         return False
 
+    if details.get("deployed"):
+        print("Monitoring session already deployed.")
+        return True
     return deploy_monitoring_session(session_id)
 
 
