@@ -95,25 +95,19 @@ az keyvault secret set --vault-name $KV_NAME --name $SECRET_NAME --value "<PASTE
 ```
 *Note: Agents automatically fetch this token from the Key Vault via managed identity to self-register. They will continually retry every 60 seconds until a valid token is found.*
 
-## Create the Monitoring Session
+## Monitoring Session (Automated)
 
-To start inspecting traffic, you must instruct the Gigamon fabric how to route traffic from the UCT-V agents to the Tool VM.
+`scripts/configure_lab.py` fully automates the Monitoring Session setup — no manual steps in the FM UI are required. When run, it:
 
-1. Login to **GigaVUE-FM**.
-2. In the left navigation pane, go to **Traffic** > **Virtual** > **Orchestrated Flows** > **Azure** (or **Monitor** > **Monitoring Session** depending on your UI version).
-3. Click **New Session** (or **Create**).
-4. **Session Name**: Enter a descriptive name (e.g., `Azure-Lab-Session`).
-5. **Select Source**: Choose the `Azure-3PO-Connection` (or the connection you specified in your variables) and select the Production VMs running the UCT-V agents as the target source.
-6. **Configure the Map (Traffic Rules)**:
-   - Create a new map to define what traffic to capture.
-   - To capture all IPv4 traffic, add a rule where **Type** = `MacV4` (or `IPv4`), **Source/Dest** = `Any`, and set the action to **Pass**.
-7. **Configure the Tunnel (Destination)**:
-   - Create or drag a new tunnel endpoint onto the canvas to act as the destination for your map.
-   - **Tunnel Type**: `VXLAN`
-   - **Destination IP**: Enter the **Private IP address of the Tool VM** (find this in the Terraform outputs).
-   - **Destination Port**: `4789`
-   - **Tunnel ID (VNI)**: `123` *(CRITICAL: The Tool VM's automated configuration explicitly expects VNI `123`. If this does not match, ntopng will not see the traffic!)*
-8. **Link and Deploy**: Connect your source, map, and tunnel endpoint in the visual canvas. Click **Save** or **Deploy** to push the configuration to the vSeries nodes.
+1. Creates the Monitoring Domain(s) and AnyCloud Connection(s).
+2. Creates the Monitoring Session (`Azure-Lab-Session`).
+3. Adds a traffic map with a pass-all-IPv4 rule.
+4. Creates a VXLAN tunnel destination pointed at the Tool VM's **private IP** (passed in automatically via Terraform), port `4789`, VNI `123` *(the Tool VM's automated configuration expects VNI `123` — do not change without updating both sides)*.
+5. Links the map to the tunnel and deploys the session to the vSeries nodes.
+
+Re-running the script is safe — it detects an already-configured session (existing map/tunnel) and skips recreating it, only (re)deploying if needed.
+
+If you need to build the session manually instead (e.g. for a custom traffic rule), use **Traffic** > **Virtual** > **Orchestrated Flows** > **Azure** in the FM UI and mirror the steps above.
 
 ## Usage & Verification
 

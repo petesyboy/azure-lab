@@ -30,6 +30,7 @@ PROD1_FQDN = "${prod1_fqdn}"
 PROD2_FQDN = "${prod2_fqdn}"
 FM_INTERNAL = "${fm_internal_name}"
 UCTV_INTERNAL = "${uctv_internal_name}"
+TOOL_VM_PRIVATE_IP = "${tool_vm_private_ip}"
 ADMIN_USER = "${admin_username}"
 
 # Azure Key Vault (optional convenience for local script)
@@ -512,6 +513,210 @@ def create_monitoring_session(domain_id, subgroup_name, session_name):
     return session_id
 
 
+def set_entity_position(session_id, entity_id, x, y):
+    """Places an entity (map/tunnel) on the monitoring session canvas."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/positions/{entity_id}"
+    try:
+        resp = requests.put(
+            url,
+            params={"x": x, "y": y},
+            json={"id": session_id, "entityId": entity_id, "x": x, "y": y},
+            headers=AUTH_HEADERS,
+            verify=False,
+        )
+        if resp.status_code not in (200, 202):
+            print(f"[WARNING] Failed to position entity {entity_id}: {resp.status_code} {resp.text}")
+    except Exception as e:
+        print(f"Error positioning entity {entity_id}: {e}")
+
+
+def create_traffic_map(session_id, map_name, aep_id=2):
+    """Creates a pass-all-IPv4 traffic map on the monitoring session canvas."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    payload = {
+        "requests": [
+            {
+                "entityType": "trafficMap",
+                "operation": "create",
+                "map": {
+                    "name": map_name,
+                    "comment": "",
+                    "ruleSets": [
+                        {
+                            "ruleSetId": 1,
+                            "aepId": aep_id,
+                            "priority": 1,
+                            "passRules": [
+                                {
+                                    "matches": [
+                                        {"type": "ipVer", "value": "v4", "pos": 0}
+                                    ],
+                                    "ruleId": 1,
+                                }
+                            ],
+                            "dropRules": [],
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "trafficMap" and op.get("status") == "success":
+                    map_id = op.get("id")
+                    print(f"Created traffic map '{map_name}' (ID: {map_id}).")
+                    set_entity_position(session_id, map_id, 630, 350)
+                    return map_id
+            print(f"[ERROR] Traffic map creation did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to create traffic map. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error creating traffic map: {e}")
+    return None
+
+
+def create_vxlan_tunnel(session_id, tunnel_alias, remote_ip, vni=123, dport=4789):
+    """Creates a VXLAN tunnel spec and attaches it to the monitoring session canvas."""
+    spec_url = f"{FM_URL}/api/v1.3/cloud/tunnelSpecs"
+    spec_payload = {
+        "alias": tunnel_alias,
+        "type": "vxlan",
+        "trafficDirection": "out",
+        "remoteIP": remote_ip,
+        "multiTunnel": False,
+        "dscp": "0",
+        "flowLabel": "0",
+        "mtu": "1500",
+        "ttl": "64",
+        "vni": str(vni),
+        "dport": str(dport),
+    }
+    try:
+        resp = requests.post(spec_url, json=spec_payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code not in (200, 201):
+            print(f"[ERROR] Failed to create tunnel spec. API returned {resp.status_code}: {resp.text}")
+            return None
+        tunnel_spec = resp.json()
+        print(f"Created tunnel spec '{tunnel_alias}' (ID: {tunnel_spec.get('id')}).")
+    except Exception as e:
+        print(f"Error creating tunnel spec: {e}")
+        return None
+
+    update_url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    update_payload = {
+        "requests": [
+            {"entityType": "tunnel", "operation": "create", "tunnel": tunnel_spec}
+        ]
+    }
+    try:
+        resp = requests.post(update_url, json=update_payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "tunnel" and op.get("status") == "success":
+                    tunnel_id = op.get("id")
+                    print(f"Attached tunnel '{tunnel_alias}' to session (ID: {tunnel_id}).")
+                    set_entity_position(session_id, tunnel_id, 870, 230)
+                    return tunnel_id
+            print(f"[ERROR] Tunnel attach did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to attach tunnel to session. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error attaching tunnel to session: {e}")
+    return None
+
+
+def link_map_to_tunnel(session_id, map_id, tunnel_id, aep_id=2):
+    """Links the traffic map to the tunnel destination on the monitoring session canvas."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    payload = {
+        "requests": [
+            {
+                "entityType": "link",
+                "operation": "create",
+                "link": {
+                    "alias": "",
+                    "source": {"id": map_id, "type": "map", "aepId": aep_id},
+                    "dest": {"id": tunnel_id, "type": "tunnel"},
+                },
+            }
+        ]
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "link" and op.get("status") == "success":
+                    print(f"Linked map to tunnel (Link ID: {op.get('id')}).")
+                    return op.get("id")
+            print(f"[ERROR] Link creation did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to link map to tunnel. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error linking map to tunnel: {e}")
+    return None
+
+
+def deploy_monitoring_session(session_id):
+    """Deploys the monitoring session, pushing the map/tunnel config to the vSeries nodes."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/deploy"
+    try:
+        resp = requests.post(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            print(f"Monitoring session '{session_id}' deployed.")
+            return True
+        print(f"[ERROR] Failed to deploy monitoring session. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error deploying monitoring session: {e}")
+    return False
+
+
+def get_monitoring_session_details(session_id):
+    """Fetches the full monitoring session object, including its maps/tunnels/links."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}"
+    try:
+        resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            return resp.json().get("monitoringSession", {})
+    except Exception as e:
+        print(f"Error retrieving monitoring session details: {e}")
+    return {}
+
+
+def configure_monitoring_session_flow(session_id, tool_vm_private_ip, map_name="Azure-Lab-Map", tunnel_alias="NtopNG"):
+    """Builds the map -> tunnel flow on an existing (empty) monitoring session and deploys it."""
+    if not session_id:
+        print("Skipping monitoring session flow configuration (No Session ID).")
+        return False
+    if not tool_vm_private_ip:
+        print("Skipping monitoring session flow configuration (No Tool VM private IP).")
+        return False
+
+    details = get_monitoring_session_details(session_id)
+    if details.get("trafficMaps") or details.get("tunnels"):
+        print(f"Monitoring session '{session_id}' already has a map/tunnel flow configured. Skipping.")
+        if not details.get("deployed"):
+            return deploy_monitoring_session(session_id)
+        return True
+
+    map_id = create_traffic_map(session_id, map_name)
+    tunnel_id = create_vxlan_tunnel(session_id, tunnel_alias, tool_vm_private_ip)
+    if not map_id or not tunnel_id:
+        print("[ERROR] Could not complete monitoring session flow (map/tunnel creation failed).")
+        return False
+
+    if not link_map_to_tunnel(session_id, map_id, tunnel_id):
+        print("[ERROR] Could not complete monitoring session flow (link creation failed).")
+        return False
+
+    return deploy_monitoring_session(session_id)
+
+
 def push_node_config(token, fqdn, node_name, service_name, group_name, subgroup_name, step_label):
     """Pushes the registration token and config to a node via SSH."""
     if not fqdn:
@@ -766,7 +971,9 @@ def main():
 
     # Create Monitoring Session for Main Domain
     if domain_id:
-        create_monitoring_session(domain_id, subgroup_name, "Azure-Lab-Session")
+        session_id = create_monitoring_session(domain_id, subgroup_name, "Azure-Lab-Session")
+        if session_id:
+            configure_monitoring_session_flow(session_id, TOOL_VM_PRIVATE_IP)
 
     # 3-5. Register the UCTV, vSeries, and AMX nodes in parallel via SSH
     push_all_node_configs(agent_token)

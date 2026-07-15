@@ -504,6 +504,7 @@ resource "local_file" "configure_script" {
     prod2_fqdn           = module.prod2.public_ip
     fm_internal_name     = module.fm.private_ip
     uctv_internal_name   = module.uctv_controller.private_ip
+    tool_vm_private_ip   = module.tool_vm.private_ip
     key_vault_name       = azurerm_key_vault.fm_token_kv.name
     fm_token_secret_name = var.fm_token_secret_name
   })
