@@ -4,10 +4,10 @@
 locals {
   # Gigamon version configuration
   # These locals derive the correct image SKU and version strings from the `gigamon_version` variable.
-  gigamon_version_sku_code = replace(var.gigamon_version, ".", "") # e.g., "6.13" -> "613"
+  gigamon_version_sku_code = replace(var.gigamon_version, ".", "") # e.g., "6.14" -> "614"
 
   fm_image_sku     = "gfm-azure-v${local.gigamon_version_sku_code}00"
-  fm_image_version = "${var.gigamon_version}.00" # NOTE: This was 6.12.1099. Using .00 as a default for the new version.
+  fm_image_version = "${var.gigamon_version}.00"
 
   uctv_image_sku     = "uctv-cntlr-v${local.gigamon_version_sku_code}00"
   uctv_image_version = "${var.gigamon_version}.00"

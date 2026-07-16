@@ -35,7 +35,7 @@ def check_uctv_deb():
     deb_files = glob.glob(os.path.join(deb_dir, "gigamon-gigavue-uctv-*.deb"))
     
     # Try to parse the default gigamon_version from variables.tf
-    version = "6.13" # Fallback default
+    version = "6.14" # Fallback default
     if os.path.exists("variables.tf"):
         try:
             with open("variables.tf", "r") as f:
@@ -321,7 +321,7 @@ def bootstrap_remote_state():
 
 def main():
     print("===========================================================")
-    print(" Azure Lab 6.1x - Gigamon V Series Deployment Wrapper v1.0 ")
+    print(" Azure Lab - Gigamon V Series Deployment Wrapper v1.0 ")
     print("===========================================================")
     
     # Check management IP security warning
