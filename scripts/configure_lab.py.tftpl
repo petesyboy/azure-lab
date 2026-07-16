@@ -771,6 +771,52 @@ def get_monitoring_session_details(session_id):
     return {}
 
 
+def set_session_scale_unit(session_id, scale_unit=2):
+    """
+    Sets the session's Scale Unit - the flow-table capacity tier an AMI/
+    appmetadata app needs (1 = 100k flows, 2 = 200k flows). Without this set,
+    FM rejects the AMI app's deploy for having no flow-count configured, even
+    though nothing in the app's own payload references it - it's a property
+    of the session, set via a PATCH captured separately from the app-creation
+    request itself.
+
+    Returns (success, changed).
+    """
+    details = get_monitoring_session_details(session_id)
+    if not details:
+        print("[ERROR] Could not fetch session details to set scale unit.")
+        return False, False
+    if details.get("scaleUnit") == scale_unit:
+        print(f"Session scale unit already set to {scale_unit}.")
+        return True, False
+
+    payload = {
+        "id": session_id,
+        "alias": details.get("alias"),
+        "distributeTraffic": details.get("distributeTraffic", False),
+        "fastMode": details.get("fastMode", False),
+        "scaleUnit": scale_unit,
+        "connIds": details.get("connIds", []),
+        "platform": details.get("platform"),
+        "uctVFilteringEnabled": details.get("uctVFilteringEnabled", False),
+        "uctVPrecryptionEnabled": details.get("uctVPrecryptionEnabled", False),
+        "uctVMirrorTrafficEnabled": details.get("uctVMirrorTrafficEnabled", True),
+        "uctVPrecryptionFilteringEnabled": details.get("uctVPrecryptionFilteringEnabled", False),
+        "secureTunnelOnPrecryptionEnabled": details.get("secureTunnelOnPrecryptionEnabled", False),
+        "secureTunnelOnMirrorEnabled": details.get("secureTunnelOnMirrorEnabled", False),
+    }
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}"
+    try:
+        resp = requests.patch(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            print(f"Set session scale unit to {scale_unit}.")
+            return True, True
+        print(f"[ERROR] Failed to set scale unit. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error setting scale unit: {e}")
+    return False, False
+
+
 def create_raw_endpoint(session_id, alias):
     """Creates a 'raw' endpoint entity (a physical ingress/egress interface placeholder) on a session."""
     url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
@@ -1200,6 +1246,7 @@ def configure_monitoring_session_flow(
     amx_ingress_tunnel_alias="AMX-Ingress",
     amx_ingress_dport=2055,
     amx_ingress_sport=23385,
+    ami_scale_unit=2,
 ):
     """
     Builds the main session's flow and deploys it:
@@ -1303,6 +1350,13 @@ def configure_monitoring_session_flow(
     # via the "SplunkMetadataTemplate" profile, out to two UDP destinations:
     # Elastic (Logstash on the Tool VM) and the AMX node's ingress raw
     # interface (for the AMX session to eventually forward on to Cribl).
+    # The session's Scale Unit (flow-table capacity) must be set before the
+    # app can deploy - FM otherwise rejects it as having no flow count.
+    scale_unit_ok, scale_unit_changed = set_session_scale_unit(session_id, ami_scale_unit)
+    if not scale_unit_ok:
+        print("[WARNING] Could not set session scale unit - AMI app deploy may fail.")
+    session_changed = session_changed or scale_unit_changed
+
     existing_apps = details.get("applications") or []
     if existing_apps:
         app_id = existing_apps[0].get("id")
@@ -1314,7 +1368,7 @@ def configure_monitoring_session_flow(
         else:
             print("[WARNING] Could not create AMI application - continuing without it.")
 
-    exports_ok = True
+    exports_ok = scale_unit_ok
     if app_id:
         ok, changed = ensure_app_udp_export(app_id, elastic_tunnel_alias, tool_vm_private_ip, elastic_dport, elastic_sport)
         exports_ok = exports_ok and ok
