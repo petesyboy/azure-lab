@@ -771,6 +771,198 @@ def create_session_link(session_id, source_id, source_type, dest_id, dest_type, 
     return None
 
 
+# Verbatim "SplunkMetadataTemplate" exporter config, captured from the FM UI's
+# AMI (Application Metadata Intelligence) app creation flow. This selects which
+# per-protocol fields get extracted (krb5/ssh/ssl/ftp/smb/smtp/dhcp/dns/telnet/
+# rdp/http) and exports them as CEF records. Destination (e.g. Cribl) is not
+# part of this config - see create_ami_application()'s docstring.
+_AMI_APP_PROFILE_CONFIG = [
+    {
+        "applications": [
+            {"name": "krb5", "attributes": [{"name": n, "value": "true"} for n in
+                ["err-text", "error-code", "login", "message-type", "server", "service"]]},
+            {"name": "ssh", "attributes": [{"name": n, "value": "true"} for n in
+                ["rtt", "version"]]},
+            {"name": "ssl", "attributes": [{"name": n, "value": "true"} for n in
+                ["cipher-suite-id", "common-name", "issuer", "validity-not-after", "validity-not-before"]]},
+            {"name": "ftp", "attributes": [{"name": n, "value": "true"} for n in
+                ["data-port", "login", "return-code"]]},
+            {"name": "smb", "attributes": [{"name": n, "value": "true"} for n in
+                ["command", "command-string", "create-action", "dcerpc-service", "filename", "filesize",
+                 "nt-status", "ntlm-domain", "ntlm-user", "ntlm-workstation", "path", "service",
+                 "share-access", "user-id", "version"]]},
+            {"name": "smtp", "attributes": [{"name": n, "value": "true"} for n in
+                ["client-domain", "date", "message-id", "received-from-name", "receiver", "replyto",
+                 "sender", "subject"]]},
+            {"name": "dhcp", "attributes": [{"name": n, "value": "true"} for n in
+                ["chaddr", "dns-server", "domain-name", "host-name", "ip-lease-time", "message-type",
+                 "router", "yiaddr"]]},
+            {"name": "dns", "attributes": [{"name": n, "value": "true"} for n in
+                ["ancount", "arcount", "class", "flags", "host", "host-addr", "host-class", "host-raw",
+                 "host-type", "name", "opcode", "qdcount", "query", "query-type", "reply-code",
+                 "response-time", "reverse-addr", "transaction-id", "ttl", "tunneling"]]},
+            {"name": "telnet", "attributes": [{"name": n, "value": "true"} for n in
+                ["login", "password", "rtt", "term-type"]]},
+            {"name": "rdp", "attributes": [{"name": n, "value": "true"} for n in
+                ["client-product-id", "default-username", "desktop-height", "desktop-width",
+                 "encryption-level", "encryption-method", "hostname-ascii", "keyboard-type",
+                 "security-protocol", "username-ascii", "username-raw", "version"]]},
+            {"name": "http", "attributes": [{"name": n, "value": "true"} for n in
+                ["auth-username", "code", "content-len", "content-type", "forward-addr", "host",
+                 "location", "method", "mime-type", "mime-type", "proxied-traffic", "referer",
+                 "referer-path", "referer-server", "request-size", "rtt", "server", "server-agent",
+                 "smb-client", "uri", "uri-decoded", "uri-full", "uri-path", "uri-path-decoded",
+                 "uri-raw", "user-agent", "version"]]},
+        ],
+        "counter": {"bytes": False, "bytesLong": True, "packets": False, "packetsLong": True},
+        "datalink": {"macDst": True, "macSrc": True, "vlan": True},
+        "flow": {"endReason": True},
+        "ip": {"version": True},
+        "ipv4": {
+            "destination": {"prefixMinMask": "/32"},
+            "dscp": False,
+            "fragmentation": {"flags": False, "id": False, "offset": False},
+            "headerLen": False,
+            "optionMap": False,
+            "precedence": False,
+            "protocol": True,
+            "source": {"prefixMinMask": "/32"},
+            "tos": False,
+            "totalLength": False,
+            "ttl": False,
+        },
+        "ipv6": {
+            "destination": {"prefixMinMask": "/128"},
+            "dscp": False,
+            "extensionMap": False,
+            "flowLabel": False,
+            "fragmentation": {"flags": False, "id": False, "offset": False},
+            "hopLimit": False,
+            "length": {"header": False, "total": False, "payload": False},
+            "nextHeader": True,
+            "precedence": False,
+            "source": {"prefixMinMask": "/128"},
+            "trafficClass": False,
+        },
+        "timestamp": {
+            "flowStartUsec": False, "flowEndUsec": False, "flowEndMsec": True, "flowEndsec": False,
+            "flowStartMsec": True, "flowStartsec": False, "sysUpTimeFirst": True, "sysUpTimeLast": True,
+        },
+        "transport": {
+            "dstPort": True,
+            "icmp": {"ipv4Code": False, "ipv4Type": False, "ipv6Code": False, "ipv6Type": False},
+            "srcPort": True,
+            "tcp": {"ackNumber": False, "dstPort": False, "flags": False, "headerLen": False,
+                    "seqNumber": False, "srcPort": False, "urgentPtr": False, "windowSize": False},
+            "udp": {"dstPort": False, "msgLen": False, "srcPort": False},
+        },
+        "interface": {"inPhysicalWidth": 2, "outPhysicalWidth": 2, "inNameWidth": 32},
+        "applicationId": True,
+        "familyId": False,
+        "tagId": False,
+    }
+]
+
+
+def create_ami_application(session_id, map_id, alias="AMI-Session", exporter_name="AMI-To-AMX", aep_id=2):
+    """
+    Creates the AMI (Application Metadata Intelligence / "appmetadata") GigaSMART
+    app on a session and links it from the traffic map, using the
+    "SplunkMetadataTemplate" export profile (CEF-formatted records).
+
+    NOTE: This does NOT configure where the exported records actually go. The
+    exporter is named "AMI-To-AMX" (matching what was captured from the FM UI)
+    but nothing in this payload references the AMX node/domain or any network
+    destination - how that hop is actually wired (and where Cribl fits in) is
+    still an open question pending further FM UI capture.
+    """
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    # FM's batch API lets a same-batch request forward-reference an entity that
+    # hasn't been assigned a real ID yet, via a client-chosen "referenceId" -
+    # confirmed from the HAR: the link's dest.id was literally set to the
+    # application create request's referenceId.
+    app_ref_id = "app-1"
+    payload = {
+        "requests": [
+            {
+                "entityType": "application",
+                "operation": "create",
+                "referenceId": app_ref_id,
+                "application": {
+                    "name": "appmetadata",
+                    "alias": alias,
+                    "description": "",
+                    "appMetadata": {
+                        "flowBehavior": "bidir",
+                        "timeout": {"idle": 300},
+                        "multiCollect": False,
+                        "aggregateMode": False,
+                        "observDomainId": 0,
+                        "match": {
+                            "ipv4": {
+                                "destination": {"prefixMinMask": "/32"},
+                                "protocol": True,
+                                "source": {"prefixMinMask": "/32"},
+                            },
+                            "ipv6": {
+                                "destination": {"prefixMinMask": "/128"},
+                                "nextHeader": True,
+                                "source": {"prefixMinMask": "/128"},
+                            },
+                            "transport": {"dstPort": True, "srcPort": True},
+                        },
+                        "dpiInjectLimit": 0,
+                        "exporters": [
+                            {
+                                "aepid": aep_id,
+                                "name": exporter_name,
+                                "exporterConfig": {
+                                    "type": "cef",
+                                    "maxPktSize": 0,
+                                    "appProfileConfig": _AMI_APP_PROFILE_CONFIG,
+                                    "cef": {"activeTimeout": 60, "inactiveTimeout": 15, "recordType": "cohesive"},
+                                    "snmp": {"enabled": False},
+                                },
+                                "templateName": "SplunkMetadataTemplate",
+                            }
+                        ],
+                    },
+                },
+            },
+            {
+                "entityType": "link",
+                "operation": "create",
+                "referenceId": "link-1",
+                "link": {
+                    "alias": "",
+                    "source": {"id": map_id, "type": "map", "aepId": aep_id},
+                    "dest": {"id": app_ref_id, "type": "application"},
+                },
+            },
+        ]
+    }
+
+    try:
+        resp = requests.post(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            app_id = None
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "application" and op.get("status") == "success":
+                    app_id = op.get("id")
+                    print(f"Created AMI application '{alias}' (ID: {app_id}).")
+                elif op.get("entityType") == "link" and op.get("status") == "success":
+                    print(f"Linked map:{map_id} -> application (Link ID: {op.get('id')}).")
+            if app_id:
+                return app_id
+            print(f"[ERROR] AMI application creation did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to create AMI application. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error creating AMI application: {e}")
+    return None
+
+
 def get_vseries_node_ids(session_id):
     """Retrieves the vSeries/AMX node IDs currently registered to a monitoring session."""
     url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/vseriesNodes"
@@ -932,7 +1124,19 @@ def configure_monitoring_session_flow(session_id, tool_vm_private_ip, map_name="
         print("[ERROR] Could not complete monitoring session flow (link creation failed).")
         return False
 
-    if details.get("deployed"):
+    # AMI (Application Metadata Intelligence) app - exports CEF metadata records
+    # via the "SplunkMetadataTemplate" profile. Destination (e.g. Cribl) is not
+    # yet configured here - see create_ami_application()'s docstring.
+    existing_apps = details.get("applications") or []
+    newly_added_app = False
+    if existing_apps:
+        print(f"AMI application already on session (ID: {existing_apps[0].get('id')}). Reusing it.")
+    elif create_ami_application(session_id, map_id):
+        newly_added_app = True
+    else:
+        print("[WARNING] Could not create AMI application - continuing without it.")
+
+    if details.get("deployed") and not newly_added_app:
         print("Monitoring session already deployed.")
         return True
     return deploy_monitoring_session(session_id)
