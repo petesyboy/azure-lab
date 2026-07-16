@@ -12,6 +12,11 @@ output "private_ip" {
   value       = azurerm_network_interface.nic.private_ip_address
 }
 
+output "secondary_private_ip" {
+  description = "Private IP address of the secondary (data-plane) NIC, if created."
+  value       = var.create_secondary_nic ? azurerm_network_interface.nic2[0].private_ip_address : null
+}
+
 output "vm_id" {
   description = "The ID of the Virtual Machine."
   value       = azurerm_virtual_machine.vm.id

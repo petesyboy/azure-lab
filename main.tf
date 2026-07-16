@@ -116,8 +116,8 @@ resource "azurerm_key_vault" "fm_token_kv" {
   purge_protection_enabled   = false
   soft_delete_retention_days = 7
 
-  # Use Azure RBAC instead of legacy access policies
-  enable_rbac_authorization     = true
+  # Use standard access policies instead of RBAC for instantaneous propagation
+  enable_rbac_authorization     = false
   public_network_access_enabled = true
 
   tags = {
@@ -131,16 +131,20 @@ resource "azurerm_key_vault" "fm_token_kv" {
 }
 
 # Allow the Terraform caller to upload/update the token secret.
-# Note: role assignments can take a minute or two to propagate.
-resource "azurerm_role_assignment" "kv_secrets_officer_current_user" {
-  scope                = azurerm_key_vault.fm_token_kv.id
-  role_definition_name = "Key Vault Secrets Officer"
-  principal_id         = data.azurerm_client_config.current.object_id
+# Using standard access policy instead of RBAC for instantaneous propagation.
+resource "azurerm_key_vault_access_policy" "kv_access_current_user" {
+  key_vault_id = azurerm_key_vault.fm_token_kv.id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = data.azurerm_client_config.current.object_id
+
+  secret_permissions = [
+    "Get", "List", "Set", "Delete", "Purge"
+  ]
 }
 
 resource "time_sleep" "wait_for_kv_rbac" {
-  create_duration = "60s"
-  depends_on      = [azurerm_role_assignment.kv_secrets_officer_current_user]
+  create_duration = "10s"
+  depends_on      = [azurerm_key_vault_access_policy.kv_access_current_user]
 }
 
 ############################################################
@@ -177,23 +181,10 @@ resource "azurerm_storage_blob" "uctv_agent_package" {
   type                   = "Block"
   source                 = "${path.module}/UCTV-files/gigamon-gigavue-uctv-${var.gigamon_version}.00-amd64.deb"
 
-  # Wait for storage container to exist and permissions to propagate
+  # Wait for storage container to exist
   depends_on = [
-    azurerm_storage_container.uctv_container,
-    time_sleep.wait_for_storage_rbac
+    azurerm_storage_container.uctv_container
   ]
-}
-
-# Allow the Terraform caller to upload files to the blob container via Entra ID
-resource "azurerm_role_assignment" "storage_blob_data_contributor_current_user" {
-  scope                = azurerm_storage_account.lab_sa.id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = data.azurerm_client_config.current.object_id
-}
-
-resource "time_sleep" "wait_for_storage_rbac" {
-  create_duration = "60s"
-  depends_on      = [azurerm_role_assignment.storage_blob_data_contributor_current_user]
 }
 
 ############################################################
@@ -468,7 +459,7 @@ module "prod2" {
 # Orchestration
 # -----------------------------------------------------------------------------
 
-resource "azurerm_role_assignment" "kv_secrets_users" {
+resource "azurerm_key_vault_access_policy" "kv_access_users" {
   for_each = {
     uctv    = module.uctv_controller.principal_id
     vseries = module.vseries.principal_id
@@ -477,9 +468,13 @@ resource "azurerm_role_assignment" "kv_secrets_users" {
     prod2   = module.prod2.principal_id
   }
 
-  scope                = azurerm_key_vault.fm_token_kv.id
-  role_definition_name = "Key Vault Secrets User"
-  principal_id         = each.value
+  key_vault_id = azurerm_key_vault.fm_token_kv.id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = each.value
+
+  secret_permissions = [
+    "Get", "List"
+  ]
 }
 
 resource "azurerm_role_assignment" "storage_blob_readers" {
@@ -509,6 +504,10 @@ resource "local_file" "configure_script" {
     prod2_fqdn           = module.prod2.public_ip
     fm_internal_name     = module.fm.private_ip
     uctv_internal_name   = module.uctv_controller.private_ip
+    tool_vm_private_ip   = module.tool_vm.private_ip
+    amx_ingress_private_ip = module.amx.secondary_private_ip
+    cribl_endpoint       = var.cribl_endpoint
+    cribl_auth_token     = var.cribl_auth_token
     key_vault_name       = azurerm_key_vault.fm_token_kv.name
     fm_token_secret_name = var.fm_token_secret_name
   })

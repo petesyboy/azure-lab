@@ -7,6 +7,7 @@ import os
 import subprocess
 import shutil
 import argparse
+import concurrent.futures
 
 # Suppress insecure request warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -29,6 +30,10 @@ PROD1_FQDN = "${prod1_fqdn}"
 PROD2_FQDN = "${prod2_fqdn}"
 FM_INTERNAL = "${fm_internal_name}"
 UCTV_INTERNAL = "${uctv_internal_name}"
+TOOL_VM_PRIVATE_IP = "${tool_vm_private_ip}"
+AMX_INGRESS_PRIVATE_IP = "${amx_ingress_private_ip}"
+CRIBL_ENDPOINT = "${cribl_endpoint}"
+CRIBL_AUTH_TOKEN = "${cribl_auth_token}"
 ADMIN_USER = "${admin_username}"
 
 # Azure Key Vault (optional convenience for local script)
@@ -406,6 +411,989 @@ def create_anycloud_connection(domain_id, connection_alias):
     except Exception as e:
         print(f"Error creating connection: {e}")
 
+def get_monitoring_domain_id(domain_alias):
+    """Retrieves the ID of an existing Monitoring Domain by alias."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringDomains"
+    try:
+        resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            domains = data.get('monitoringDomains', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            for d in domains:
+                if isinstance(d, dict) and d.get('alias') == domain_alias:
+                    return d.get('id')
+    except Exception as e:
+        print(f"Error retrieving domain ID: {e}")
+    return None
+
+def get_monitoring_session_id(session_alias):
+    """Retrieves the ID of an existing Monitoring Session by alias."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions"
+    try:
+        resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            sessions = data.get('monitoringSessions', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            for s in sessions:
+                if isinstance(s, dict) and s.get('alias') == session_alias:
+                    return s.get('id')
+    except Exception as e:
+        print(f"Error retrieving Monitoring Session ID: {e}")
+    return None
+
+def get_anycloud_connection_id(domain_id):
+    """Retrieves the AnyCloud connection ID associated with a monitoring domain ID."""
+    url = f"{FM_URL}/api/v1.3/cloud/anyCloud/connections"
+    try:
+        resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            conns = data.get('anyCloudConnections', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            for c in conns:
+                if isinstance(c, dict) and c.get('monitoringDomainId') == domain_id:
+                    return c.get('id')
+    except Exception as e:
+        print(f"Error retrieving connection ID: {e}")
+    return None
+
+def create_monitoring_session(domain_id, subgroup_name, session_name):
+    """Creates and configures a virtual monitoring session via FM API."""
+    if not domain_id:
+        print("Skipping Monitoring Session creation (No Domain ID).")
+        return None
+
+    # Retrieve the connection ID for the domain
+    connection_id = get_anycloud_connection_id(domain_id)
+    if not connection_id:
+        print(f"[ERROR] Could not find any connection for Domain ID: {domain_id}")
+        return None
+    print(f"Found AnyCloud Connection ID: {connection_id}")
+
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions"
+
+    # GigaVUE-FM expects Content-Type: application/MonitoringSessionUctV+json for UCT-V sessions
+    headers = {
+        "Content-Type": "application/MonitoringSessionUctV+json",
+        "Accept": "application/json",
+        "Authorization": AUTH_HEADERS.get("Authorization")
+    }
+
+    session_id = None
+
+    # Check if session exists first
+    session_id = get_monitoring_session_id(session_name)
+    if session_id:
+        print(f"Monitoring Session '{session_name}' already exists (ID: {session_id}).")
+    else:
+        print(f"\nCreating Monitoring Session '{session_name}'...")
+        payload = {
+            "alias": session_name,
+            "description": "Session created via configure_lab",
+            "connIds": [connection_id],
+            "platform": "anyCloud"
+        }
+        try:
+            response = requests.post(url, json=payload, headers=headers, verify=False)
+            if response.status_code in [200, 201]:
+                data = response.json()
+                session_id = data.get("id")
+                print(f"Successfully created Monitoring Session '{session_name}' (ID: {session_id}).")
+            elif response.status_code == 409:
+                print(f"Monitoring Session '{session_name}' already exists.")
+                session_id = get_monitoring_session_id(session_name)
+            else:
+                print(f"Failed to create Monitoring Session. API returned {response.status_code}")
+                print(f"Response: {response.text}")
+                return None
+        except Exception as e:
+            print(f"Error creating Monitoring Session: {e}")
+            return None
+
+    if not session_id:
+        print("[ERROR] No Session ID retrieved.")
+        return None
+
+    return session_id
+
+
+def set_entity_position(session_id, entity_id, x, y):
+    """Places an entity (map/tunnel) on the monitoring session canvas."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/positions/{entity_id}"
+    try:
+        resp = requests.put(
+            url,
+            params={"x": x, "y": y},
+            json={"id": session_id, "entityId": entity_id, "x": x, "y": y},
+            headers=AUTH_HEADERS,
+            verify=False,
+        )
+        if resp.status_code not in (200, 202):
+            print(f"[WARNING] Failed to position entity {entity_id}: {resp.status_code} {resp.text}")
+    except Exception as e:
+        print(f"Error positioning entity {entity_id}: {e}")
+
+
+def create_traffic_map(session_id, map_name, aep_id=2):
+    """Creates a pass-all-IPv4 traffic map on the monitoring session canvas."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    payload = {
+        "requests": [
+            {
+                "entityType": "trafficMap",
+                "operation": "create",
+                "map": {
+                    "name": map_name,
+                    "comment": "",
+                    "ruleSets": [
+                        {
+                            "ruleSetId": 1,
+                            "aepId": aep_id,
+                            "priority": 1,
+                            "passRules": [
+                                {
+                                    "matches": [
+                                        {"type": "ipVer", "value": "v4", "pos": 0}
+                                    ],
+                                    "ruleId": 1,
+                                }
+                            ],
+                            "dropRules": [],
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "trafficMap" and op.get("status") == "success":
+                    map_id = op.get("id")
+                    print(f"Created traffic map '{map_name}' (ID: {map_id}).")
+                    set_entity_position(session_id, map_id, 630, 350)
+                    return map_id
+            print(f"[ERROR] Traffic map creation did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to create traffic map. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error creating traffic map: {e}")
+    return None
+
+
+def get_tunnel_spec_by_alias(tunnel_alias):
+    """Retrieves an existing tunnel spec by alias (tunnel specs are global, not per-session)."""
+    url = f"{FM_URL}/api/v1.3/cloud/tunnelSpecs"
+    try:
+        resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            specs = data.get('tunnelSpecs', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            for s in specs:
+                if isinstance(s, dict) and s.get('alias') == tunnel_alias:
+                    return s
+    except Exception as e:
+        print(f"Error retrieving tunnel spec: {e}")
+    return None
+
+
+def create_vxlan_tunnel(session_id, tunnel_alias, remote_ip, vni=123, dport=4789):
+    """Creates a VXLAN tunnel spec and attaches it to the monitoring session canvas."""
+    spec_url = f"{FM_URL}/api/v1.3/cloud/tunnelSpecs"
+    spec_payload = {
+        "alias": tunnel_alias,
+        "type": "vxlan",
+        "trafficDirection": "out",
+        "remoteIP": remote_ip,
+        "multiTunnel": False,
+        "dscp": "0",
+        "flowLabel": "0",
+        "mtu": "1500",
+        "ttl": "64",
+        "vni": str(vni),
+        "dport": str(dport),
+    }
+    try:
+        resp = requests.post(spec_url, json=spec_payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 201):
+            tunnel_spec = resp.json()
+            print(f"Created tunnel spec '{tunnel_alias}' (ID: {tunnel_spec.get('id')}).")
+        elif resp.status_code == 409:
+            # Tunnel specs are global objects and survive session deletion; reuse the existing one.
+            print(f"Tunnel spec '{tunnel_alias}' already exists. Reusing it.")
+            tunnel_spec = get_tunnel_spec_by_alias(tunnel_alias)
+            if not tunnel_spec:
+                print(f"[ERROR] Tunnel spec '{tunnel_alias}' exists but could not be retrieved.")
+                return None
+        else:
+            print(f"[ERROR] Failed to create tunnel spec. API returned {resp.status_code}: {resp.text}")
+            return None
+    except Exception as e:
+        print(f"Error creating tunnel spec: {e}")
+        return None
+
+    update_url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    update_payload = {
+        "requests": [
+            {"entityType": "tunnel", "operation": "create", "tunnel": tunnel_spec}
+        ]
+    }
+    try:
+        resp = requests.post(update_url, json=update_payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "tunnel" and op.get("status") == "success":
+                    tunnel_id = op.get("id")
+                    print(f"Attached tunnel '{tunnel_alias}' to session (ID: {tunnel_id}).")
+                    set_entity_position(session_id, tunnel_id, 870, 230)
+                    return tunnel_id
+            print(f"[ERROR] Tunnel attach did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to attach tunnel to session. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error attaching tunnel to session: {e}")
+    return None
+
+
+def create_udp_tunnel(session_id, tunnel_alias, remote_ip, dport, sport=23384):
+    """Creates a plain UDP tunnel spec (e.g. for CEF export to Logstash) and attaches it to the session."""
+    spec_url = f"{FM_URL}/api/v1.3/cloud/tunnelSpecs"
+    spec_payload = {
+        "alias": tunnel_alias,
+        "type": "udp",
+        "trafficDirection": "out",
+        "remoteIP": remote_ip,
+        "dscp": "0",
+        "flowLabel": "0",
+        "mtu": 1500,
+        "sport": sport,
+        "dport": str(dport),
+    }
+    try:
+        resp = requests.post(spec_url, json=spec_payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 201):
+            tunnel_spec = resp.json()
+            print(f"Created tunnel spec '{tunnel_alias}' (ID: {tunnel_spec.get('id')}).")
+        elif resp.status_code == 409:
+            print(f"Tunnel spec '{tunnel_alias}' already exists. Reusing it.")
+            tunnel_spec = get_tunnel_spec_by_alias(tunnel_alias)
+            if not tunnel_spec:
+                print(f"[ERROR] Tunnel spec '{tunnel_alias}' exists but could not be retrieved.")
+                return None
+        else:
+            print(f"[ERROR] Failed to create tunnel spec. API returned {resp.status_code}: {resp.text}")
+            return None
+    except Exception as e:
+        print(f"Error creating tunnel spec: {e}")
+        return None
+
+    update_url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    update_payload = {
+        "requests": [
+            {"entityType": "tunnel", "operation": "create", "tunnel": tunnel_spec}
+        ]
+    }
+    try:
+        resp = requests.post(update_url, json=update_payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "tunnel" and op.get("status") == "success":
+                    tunnel_id = op.get("id")
+                    print(f"Attached tunnel '{tunnel_alias}' to session (ID: {tunnel_id}).")
+                    set_entity_position(session_id, tunnel_id, 1100, 470)
+                    return tunnel_id
+            print(f"[ERROR] Tunnel attach did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to attach tunnel to session. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error attaching tunnel to session: {e}")
+    return None
+
+
+def link_map_to_tunnel(session_id, map_id, tunnel_id, aep_id=2):
+    """Links the traffic map to the tunnel destination on the monitoring session canvas."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    payload = {
+        "requests": [
+            {
+                "entityType": "link",
+                "operation": "create",
+                "link": {
+                    "alias": "",
+                    "source": {"id": map_id, "type": "map", "aepId": aep_id},
+                    "dest": {"id": tunnel_id, "type": "tunnel"},
+                },
+            }
+        ]
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "link" and op.get("status") == "success":
+                    print(f"Linked map to tunnel (Link ID: {op.get('id')}).")
+                    return op.get("id")
+            print(f"[ERROR] Link creation did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to link map to tunnel. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error linking map to tunnel: {e}")
+    return None
+
+
+def deploy_monitoring_session(session_id):
+    """Deploys the monitoring session, pushing the map/tunnel config to the vSeries nodes."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/deploy"
+    try:
+        resp = requests.post(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            print(f"Monitoring session '{session_id}' deployed.")
+            return True
+        print(f"[ERROR] Failed to deploy monitoring session. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error deploying monitoring session: {e}")
+    return False
+
+
+def get_monitoring_session_details(session_id):
+    """Fetches the full monitoring session object, including its maps/tunnels/links."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}"
+    try:
+        resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            return resp.json().get("monitoringSession", {})
+    except Exception as e:
+        print(f"Error retrieving monitoring session details: {e}")
+    return {}
+
+
+def set_session_scale_unit(session_id, scale_unit=2):
+    """
+    Sets the session's Scale Unit - the flow-table capacity tier an AMI/
+    appmetadata app needs (1 = 100k flows, 2 = 200k flows). Without this set,
+    FM rejects the AMI app's deploy for having no flow-count configured, even
+    though nothing in the app's own payload references it - it's a property
+    of the session, set via a PATCH captured separately from the app-creation
+    request itself.
+
+    Returns (success, changed).
+    """
+    details = get_monitoring_session_details(session_id)
+    if not details:
+        print("[ERROR] Could not fetch session details to set scale unit.")
+        return False, False
+    if details.get("scaleUnit") == scale_unit:
+        print(f"Session scale unit already set to {scale_unit}.")
+        return True, False
+
+    payload = {
+        "id": session_id,
+        "alias": details.get("alias"),
+        "distributeTraffic": details.get("distributeTraffic", False),
+        "fastMode": details.get("fastMode", False),
+        "scaleUnit": scale_unit,
+        "connIds": details.get("connIds", []),
+        "platform": details.get("platform"),
+        "uctVFilteringEnabled": details.get("uctVFilteringEnabled", False),
+        "uctVPrecryptionEnabled": details.get("uctVPrecryptionEnabled", False),
+        "uctVMirrorTrafficEnabled": details.get("uctVMirrorTrafficEnabled", True),
+        "uctVPrecryptionFilteringEnabled": details.get("uctVPrecryptionFilteringEnabled", False),
+        "secureTunnelOnPrecryptionEnabled": details.get("secureTunnelOnPrecryptionEnabled", False),
+        "secureTunnelOnMirrorEnabled": details.get("secureTunnelOnMirrorEnabled", False),
+    }
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}"
+    try:
+        resp = requests.patch(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            print(f"Set session scale unit to {scale_unit}.")
+            return True, True
+        print(f"[ERROR] Failed to set scale unit. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error setting scale unit: {e}")
+    return False, False
+
+
+def create_raw_endpoint(session_id, alias):
+    """Creates a 'raw' endpoint entity (a physical ingress/egress interface placeholder) on a session."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    payload = {
+        "requests": [
+            {"entityType": "raw", "operation": "create", "raw": {"alias": alias}}
+        ]
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "raw" and op.get("status") == "success":
+                    raw_id = op.get("id")
+                    print(f"Created raw endpoint '{alias}' (ID: {raw_id}).")
+                    return raw_id
+            print(f"[ERROR] Raw endpoint creation did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to create raw endpoint '{alias}'. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error creating raw endpoint '{alias}': {e}")
+    return None
+
+
+def create_session_link(session_id, source_id, source_type, dest_id, dest_type, source_aep_id=None):
+    """Creates a link between two entities (map/raw/tunnel) on a session's canvas."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    payload = {
+        "requests": [
+            {
+                "entityType": "link",
+                "operation": "create",
+                "link": {
+                    "alias": "",
+                    "source": {"id": source_id, "type": source_type, "aepId": source_aep_id},
+                    "dest": {"id": dest_id, "type": dest_type},
+                },
+            }
+        ]
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "link" and op.get("status") == "success":
+                    print(f"Linked {source_type}:{source_id} -> {dest_type}:{dest_id} (Link ID: {op.get('id')}).")
+                    return op.get("id")
+            print(f"[ERROR] Link creation did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to create link. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error creating link: {e}")
+    return None
+
+
+# Verbatim "SplunkMetadataTemplate" exporter config, captured from the FM UI's
+# AMI (Application Metadata Intelligence) app creation flow. This selects which
+# per-protocol fields get extracted (krb5/ssh/ssl/ftp/smb/smtp/dhcp/dns/telnet/
+# rdp/http) and exports them as CEF records. Destination (e.g. Cribl) is not
+# part of this config - see create_ami_application()'s docstring.
+_AMI_APP_PROFILE_CONFIG = [
+    {
+        "applications": [
+            {"name": "krb5", "attributes": [{"name": n, "value": "true"} for n in
+                ["err-text", "error-code", "login", "message-type", "server", "service"]]},
+            {"name": "ssh", "attributes": [{"name": n, "value": "true"} for n in
+                ["rtt", "version"]]},
+            {"name": "ssl", "attributes": [{"name": n, "value": "true"} for n in
+                ["cipher-suite-id", "common-name", "issuer", "validity-not-after", "validity-not-before"]]},
+            {"name": "ftp", "attributes": [{"name": n, "value": "true"} for n in
+                ["data-port", "login", "return-code"]]},
+            {"name": "smb", "attributes": [{"name": n, "value": "true"} for n in
+                ["command", "command-string", "create-action", "dcerpc-service", "filename", "filesize",
+                 "nt-status", "ntlm-domain", "ntlm-user", "ntlm-workstation", "path", "service",
+                 "share-access", "user-id", "version"]]},
+            {"name": "smtp", "attributes": [{"name": n, "value": "true"} for n in
+                ["client-domain", "date", "message-id", "received-from-name", "receiver", "replyto",
+                 "sender", "subject"]]},
+            {"name": "dhcp", "attributes": [{"name": n, "value": "true"} for n in
+                ["chaddr", "dns-server", "domain-name", "host-name", "ip-lease-time", "message-type",
+                 "router", "yiaddr"]]},
+            {"name": "dns", "attributes": [{"name": n, "value": "true"} for n in
+                ["ancount", "arcount", "class", "flags", "host", "host-addr", "host-class", "host-raw",
+                 "host-type", "name", "opcode", "qdcount", "query", "query-type", "reply-code",
+                 "response-time", "reverse-addr", "transaction-id", "ttl", "tunneling"]]},
+            {"name": "telnet", "attributes": [{"name": n, "value": "true"} for n in
+                ["login", "password", "rtt", "term-type"]]},
+            {"name": "rdp", "attributes": [{"name": n, "value": "true"} for n in
+                ["client-product-id", "default-username", "desktop-height", "desktop-width",
+                 "encryption-level", "encryption-method", "hostname-ascii", "keyboard-type",
+                 "security-protocol", "username-ascii", "username-raw", "version"]]},
+            {"name": "http", "attributes": [{"name": n, "value": "true"} for n in
+                ["auth-username", "code", "content-len", "content-type", "forward-addr", "host",
+                 "location", "method", "mime-type", "mime-type", "proxied-traffic", "referer",
+                 "referer-path", "referer-server", "request-size", "rtt", "server", "server-agent",
+                 "smb-client", "uri", "uri-decoded", "uri-full", "uri-path", "uri-path-decoded",
+                 "uri-raw", "user-agent", "version"]]},
+        ],
+        "counter": {"bytes": False, "bytesLong": True, "packets": False, "packetsLong": True},
+        "datalink": {"macDst": True, "macSrc": True, "vlan": True},
+        "flow": {"endReason": True},
+        "ip": {"version": True},
+        "ipv4": {
+            "destination": {"prefixMinMask": "/32"},
+            "dscp": False,
+            "fragmentation": {"flags": False, "id": False, "offset": False},
+            "headerLen": False,
+            "optionMap": False,
+            "precedence": False,
+            "protocol": True,
+            "source": {"prefixMinMask": "/32"},
+            "tos": False,
+            "totalLength": False,
+            "ttl": False,
+        },
+        "ipv6": {
+            "destination": {"prefixMinMask": "/128"},
+            "dscp": False,
+            "extensionMap": False,
+            "flowLabel": False,
+            "fragmentation": {"flags": False, "id": False, "offset": False},
+            "hopLimit": False,
+            "length": {"header": False, "total": False, "payload": False},
+            "nextHeader": True,
+            "precedence": False,
+            "source": {"prefixMinMask": "/128"},
+            "trafficClass": False,
+        },
+        "timestamp": {
+            "flowStartUsec": False, "flowEndUsec": False, "flowEndMsec": True, "flowEndsec": False,
+            "flowStartMsec": True, "flowStartsec": False, "sysUpTimeFirst": True, "sysUpTimeLast": True,
+        },
+        "transport": {
+            "dstPort": True,
+            "icmp": {"ipv4Code": False, "ipv4Type": False, "ipv6Code": False, "ipv6Type": False},
+            "srcPort": True,
+            "tcp": {"ackNumber": False, "dstPort": False, "flags": False, "headerLen": False,
+                    "seqNumber": False, "srcPort": False, "urgentPtr": False, "windowSize": False},
+            "udp": {"dstPort": False, "msgLen": False, "srcPort": False},
+        },
+        "interface": {"inPhysicalWidth": 2, "outPhysicalWidth": 2, "inNameWidth": 32},
+        "applicationId": True,
+        "familyId": False,
+        "tagId": False,
+    }
+]
+
+
+def create_ami_application(session_id, map_id, alias="AMI-Session", exporter_name="AMI-To-AMX", aep_id=2):
+    """
+    Creates the AMI (Application Metadata Intelligence / "appmetadata") GigaSMART
+    app on a session and links it from the traffic map, using the
+    "SplunkMetadataTemplate" export profile (CEF-formatted records).
+
+    NOTE: This does NOT configure where the exported records actually go. The
+    exporter is named "AMI-To-AMX" (matching what was captured from the FM UI)
+    but nothing in this payload references the AMX node/domain or any network
+    destination - how that hop is actually wired (and where Cribl fits in) is
+    still an open question pending further FM UI capture.
+    """
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    # FM's batch API lets a same-batch request forward-reference an entity that
+    # hasn't been assigned a real ID yet, via a client-chosen "referenceId" -
+    # confirmed from the HAR: the link's dest.id was literally set to the
+    # application create request's referenceId.
+    app_ref_id = "app-1"
+    payload = {
+        "requests": [
+            {
+                "entityType": "application",
+                "operation": "create",
+                "referenceId": app_ref_id,
+                "application": {
+                    "name": "appmetadata",
+                    "alias": alias,
+                    "description": "",
+                    "appMetadata": {
+                        "flowBehavior": "bidir",
+                        "timeout": {"idle": 300},
+                        "multiCollect": False,
+                        "aggregateMode": False,
+                        "observDomainId": 0,
+                        "match": {
+                            "ipv4": {
+                                "destination": {"prefixMinMask": "/32"},
+                                "protocol": True,
+                                "source": {"prefixMinMask": "/32"},
+                            },
+                            "ipv6": {
+                                "destination": {"prefixMinMask": "/128"},
+                                "nextHeader": True,
+                                "source": {"prefixMinMask": "/128"},
+                            },
+                            "transport": {"dstPort": True, "srcPort": True},
+                        },
+                        "dpiInjectLimit": 0,
+                        "exporters": [
+                            {
+                                "aepid": aep_id,
+                                "name": exporter_name,
+                                "exporterConfig": {
+                                    "type": "cef",
+                                    "maxPktSize": 0,
+                                    "appProfileConfig": _AMI_APP_PROFILE_CONFIG,
+                                    "cef": {"activeTimeout": 60, "inactiveTimeout": 15, "recordType": "cohesive"},
+                                    "snmp": {"enabled": False},
+                                },
+                                "templateName": "SplunkMetadataTemplate",
+                            }
+                        ],
+                    },
+                },
+            },
+            {
+                "entityType": "link",
+                "operation": "create",
+                "referenceId": "link-1",
+                "link": {
+                    "alias": "",
+                    "source": {"id": map_id, "type": "map", "aepId": aep_id},
+                    "dest": {"id": app_ref_id, "type": "application"},
+                },
+            },
+        ]
+    }
+
+    try:
+        resp = requests.post(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            app_id = None
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "application" and op.get("status") == "success":
+                    app_id = op.get("id")
+                    print(f"Created AMI application '{alias}' (ID: {app_id}).")
+                elif op.get("entityType") == "link" and op.get("status") == "success":
+                    print(f"Linked map:{map_id} -> application (Link ID: {op.get('id')}).")
+            if app_id:
+                return app_id
+            print(f"[ERROR] AMI application creation did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to create AMI application. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error creating AMI application: {e}")
+    return None
+
+
+def get_vseries_node_ids(session_id):
+    """Retrieves the vSeries/AMX node IDs currently registered to a monitoring session."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/vseriesNodes"
+    try:
+        resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            nodes = data.get("vseriesNodes", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            return [n.get("nodeId") for n in nodes if isinstance(n, dict) and n.get("nodeId")]
+    except Exception as e:
+        print(f"Error retrieving vSeries node IDs: {e}")
+    return []
+
+
+def wait_for_vseries_node(session_id, label, timeout=300, poll_interval=15):
+    """
+    Polls a monitoring session's registered node list until at least one node
+    appears, or times out. Node SSH registration (see push_node_config) takes
+    effect asynchronously, so deploying/binding a session immediately after
+    creating it can otherwise fail with a 409 ("no node in running state").
+    """
+    if not session_id:
+        return False
+    print(f"Waiting for {label} to register with FM (up to {timeout}s)...")
+    waited = 0
+    while waited < timeout:
+        if get_vseries_node_ids(session_id):
+            print(f"{label} is registered.")
+            return True
+        time.sleep(poll_interval)
+        waited += poll_interval
+    print(f"[WARNING] Timed out after {timeout}s waiting for {label} to register.")
+    return False
+
+
+def retry_until_true(func, description, timeout=300, poll_interval=20):
+    """
+    Retries an idempotent, no-arg callable until it returns truthy or times out.
+
+    Node registration in FM lags behind the node itself appearing in the
+    session's node list (e.g. deploy/link calls can still 409 with "no UctV
+    Controller in running state" even after wait_for_vseries_node() succeeds),
+    and there's no separate API signal to poll for that readiness. Since the
+    configure_*_flow functions are idempotent, simply retrying the whole call
+    is simpler and more robust than guessing at the right thing to poll -
+    each retry only redoes whatever didn't succeed last time.
+    """
+    waited = 0
+    while True:
+        if func():
+            return True
+        if waited >= timeout:
+            print(f"[WARNING] Giving up on {description} after {timeout}s.")
+            return False
+        print(f"Retrying {description} in {poll_interval}s...")
+        time.sleep(poll_interval)
+        waited += poll_interval
+
+
+def set_endpoint_iface_mappings(session_id, vseries_node_id, iface_endpoint_pairs):
+    """Binds raw endpoint entities to physical interfaces on a vSeries/AMX node."""
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/endpointIfaceMappings"
+    payload = {
+        "monitoringSessionId": session_id,
+        "vseriesEndpointIfaceMappings": [
+            {
+                "vseriesNodeIds": [vseries_node_id],
+                "endpointIfaceMappings": [
+                    {"iface": iface, "endpointId": endpoint_id}
+                    for iface, endpoint_id in iface_endpoint_pairs
+                ],
+            }
+        ],
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            print(f"Bound endpoint interfaces on node {vseries_node_id}: {iface_endpoint_pairs}.")
+            return True
+        print(f"[ERROR] Failed to set endpoint interface mappings. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error setting endpoint interface mappings: {e}")
+    return False
+
+
+def configure_ami_monitoring_session_flow(
+    session_id,
+    map_name="Azure-AMX-Map",
+    ingress_alias="Ingress-Raw-Endpoint",
+    egress_alias="Egress-Raw-Endpoint",
+    ingress_iface="eth1",
+    egress_iface="eth2",
+    aep_id=2,
+):
+    """
+    Builds the Ingress-Raw -> Map -> Egress-Raw flow on the AMX/AMI monitoring
+    session, binds the raw endpoints to the AMX node's physical data interfaces,
+    and deploys it.
+
+    NOTE: This wires up traffic selection and interface binding only. It does
+    NOT yet attach the AMX/AMI ("ogw") GigaSMART app or configure a destination
+    (e.g. Cribl) on the egress side - that piece still needs a captured request
+    from the FM UI (guessing JSON field names against an undocumented schema
+    risks a payload FM silently accepts but never actually exports data from).
+    """
+    if not session_id:
+        print("Skipping AMI monitoring session flow configuration (No Session ID).")
+        return False
+
+    details = get_monitoring_session_details(session_id)
+
+    existing_maps = details.get("trafficMaps") or []
+    if existing_maps:
+        map_id = existing_maps[0].get("id")
+        print(f"Traffic map already on AMI session (ID: {map_id}). Reusing it.")
+    else:
+        map_id = create_traffic_map(session_id, map_name, aep_id=aep_id)
+
+    if not map_id:
+        print("[ERROR] Could not complete AMI monitoring session flow (map creation failed).")
+        return False
+
+    existing_raw = details.get("rawEndPoints") or []
+    ingress_raw = next((r for r in existing_raw if r.get("alias") == ingress_alias), None)
+    egress_raw = next((r for r in existing_raw if r.get("alias") == egress_alias), None)
+
+    ingress_id = ingress_raw.get("id") if ingress_raw else create_raw_endpoint(session_id, ingress_alias)
+    egress_id = egress_raw.get("id") if egress_raw else create_raw_endpoint(session_id, egress_alias)
+    if ingress_raw:
+        print(f"Raw endpoint '{ingress_alias}' already on session (ID: {ingress_id}). Reusing it.")
+    if egress_raw:
+        print(f"Raw endpoint '{egress_alias}' already on session (ID: {egress_id}). Reusing it.")
+
+    if not ingress_id or not egress_id:
+        print("[ERROR] Could not complete AMI monitoring session flow (raw endpoint creation failed).")
+        return False
+
+    existing_links = details.get("links") or []
+    if len(existing_links) >= 2:
+        print("Ingress/egress raw links already on session. Reusing them.")
+    else:
+        if not create_session_link(session_id, ingress_id, "raw", map_id, "map", source_aep_id=None):
+            print("[ERROR] Could not complete AMI monitoring session flow (ingress link creation failed).")
+            return False
+        if not create_session_link(session_id, map_id, "map", egress_id, "raw", source_aep_id=aep_id):
+            print("[ERROR] Could not complete AMI monitoring session flow (egress link creation failed).")
+            return False
+
+    node_ids = get_vseries_node_ids(session_id)
+    if not node_ids:
+        print("[WARNING] No AMX node registered to this session yet - skipping interface binding/deploy for now.")
+        return False
+
+    if not set_endpoint_iface_mappings(
+        session_id, node_ids[0], [(ingress_iface, ingress_id), (egress_iface, egress_id)]
+    ):
+        print("[ERROR] Could not complete AMI monitoring session flow (interface binding failed).")
+        return False
+
+    if details.get("deployed"):
+        print("AMI monitoring session already deployed.")
+    elif not deploy_monitoring_session(session_id):
+        return False
+
+    print("[TODO] AMX/AMI (\"ogw\") GigaSMART app + Cribl destination not yet wired up on the egress endpoint.")
+    return True
+
+
+def configure_monitoring_session_flow(
+    session_id,
+    tool_vm_private_ip,
+    amx_ingress_private_ip=None,
+    map_name="Azure-Lab-Map",
+    tunnel_alias="NtopNG",
+    elastic_tunnel_alias="Elastic",
+    elastic_dport=1514,
+    elastic_sport=23384,
+    amx_ingress_tunnel_alias="AMX-Ingress",
+    amx_ingress_dport=2055,
+    amx_ingress_sport=23385,
+    ami_scale_unit=2,
+):
+    """
+    Builds the main session's flow and deploys it:
+      Map -> NtopNG (VXLAN tunnel)                         - raw packet mirror
+      Map -> AMI application -> Elastic (UDP, Logstash:1514)
+      Map -> AMI application -> AMX-Ingress (UDP, AMX node's ingress raw
+                                              interface - see
+                                              configure_ami_monitoring_session_flow())
+
+    Looks entities up by alias/relationship (not list position) since the
+    session now holds multiple tunnels and links once all destinations exist.
+
+    NOTE: amx_ingress_dport is a guess (2055, the conventional NetFlow/IPFIX
+    port) rather than something captured from FM. The AMX side is a "raw"
+    endpoint bound directly to a physical interface (not a listening service
+    on a specific port), so the destination port likely doesn't affect
+    whether the AMX node actually receives the packets - but this hasn't
+    been confirmed against a live capture yet.
+    """
+    if not session_id:
+        print("Skipping monitoring session flow configuration (No Session ID).")
+        return False
+    if not tool_vm_private_ip:
+        print("Skipping monitoring session flow configuration (No Tool VM private IP).")
+        return False
+
+    # Resume from whatever partial state the session is in (any entity below
+    # may already exist from a previous run).
+    details = get_monitoring_session_details(session_id)
+    existing_tunnels = details.get("tunnels") or []
+    existing_links = details.get("links") or []
+    session_changed = False
+
+    def find_link(source_id, dest_id):
+        return next(
+            (l for l in existing_links
+             if l.get("source", {}).get("id") == source_id and l.get("dest", {}).get("id") == dest_id),
+            None,
+        )
+
+    def ensure_app_udp_export(app_id, tunnel_alias_, remote_ip, dport, sport):
+        """
+        Creates (or reuses) a UDP tunnel and links it from the AMI app.
+        Returns (success, changed) - success is False if either step failed
+        (e.g. the transient "no UctV Controller in running state" 409), so the
+        caller can force a retry rather than reporting overall success on a
+        session that's missing this destination.
+        """
+        changed = False
+        tunnel = next((t for t in existing_tunnels if t.get("alias") == tunnel_alias_), None)
+        if tunnel:
+            tunnel_id = tunnel.get("id")
+            print(f"'{tunnel_alias_}' tunnel already on session (ID: {tunnel_id}). Reusing it.")
+        else:
+            tunnel_id = create_udp_tunnel(session_id, tunnel_alias_, remote_ip, dport, sport)
+            if tunnel_id:
+                changed = True
+
+        if not tunnel_id:
+            print(f"[WARNING] Could not create '{tunnel_alias_}' tunnel - AMI export destination not configured.")
+            return False, changed
+
+        if find_link(app_id, tunnel_id):
+            print(f"AMI-to-'{tunnel_alias_}' link already on session. Reusing it.")
+            return True, changed
+        elif create_session_link(session_id, app_id, "application", tunnel_id, "tunnel", source_aep_id=2):
+            return True, True
+        else:
+            print(f"[WARNING] Could not link AMI application to '{tunnel_alias_}' tunnel.")
+            return False, changed
+
+    existing_maps = details.get("trafficMaps") or []
+    if existing_maps:
+        map_id = existing_maps[0].get("id")
+        print(f"Traffic map already on session (ID: {map_id}). Reusing it.")
+    else:
+        map_id = create_traffic_map(session_id, map_name)
+        session_changed = True
+
+    vxlan_tunnel = next((t for t in existing_tunnels if t.get("alias") == tunnel_alias), None)
+    if vxlan_tunnel:
+        tunnel_id = vxlan_tunnel.get("id")
+        print(f"Tunnel already on session (ID: {tunnel_id}). Reusing it.")
+    else:
+        tunnel_id = create_vxlan_tunnel(session_id, tunnel_alias, tool_vm_private_ip)
+        session_changed = True
+
+    if not map_id or not tunnel_id:
+        print("[ERROR] Could not complete monitoring session flow (map/tunnel creation failed).")
+        return False
+
+    if find_link(map_id, tunnel_id):
+        print("Map-to-tunnel link already on session. Reusing it.")
+    elif not link_map_to_tunnel(session_id, map_id, tunnel_id):
+        print("[ERROR] Could not complete monitoring session flow (link creation failed).")
+        return False
+    else:
+        session_changed = True
+
+    # AMI (Application Metadata Intelligence) app - exports CEF metadata records
+    # via the "SplunkMetadataTemplate" profile, out to two UDP destinations:
+    # Elastic (Logstash on the Tool VM) and the AMX node's ingress raw
+    # interface (for the AMX session to eventually forward on to Cribl).
+    # The session's Scale Unit (flow-table capacity) must be set before the
+    # app can deploy - FM otherwise rejects it as having no flow count.
+    scale_unit_ok, scale_unit_changed = set_session_scale_unit(session_id, ami_scale_unit)
+    if not scale_unit_ok:
+        print("[WARNING] Could not set session scale unit - AMI app deploy may fail.")
+    session_changed = session_changed or scale_unit_changed
+
+    existing_apps = details.get("applications") or []
+    if existing_apps:
+        app_id = existing_apps[0].get("id")
+        print(f"AMI application already on session (ID: {app_id}). Reusing it.")
+    else:
+        app_id = create_ami_application(session_id, map_id)
+        if app_id:
+            session_changed = True
+        else:
+            print("[WARNING] Could not create AMI application - continuing without it.")
+
+    exports_ok = scale_unit_ok
+    if app_id:
+        ok, changed = ensure_app_udp_export(app_id, elastic_tunnel_alias, tool_vm_private_ip, elastic_dport, elastic_sport)
+        exports_ok = exports_ok and ok
+        session_changed = session_changed or changed
+        if amx_ingress_private_ip:
+            ok, changed = ensure_app_udp_export(
+                app_id, amx_ingress_tunnel_alias, amx_ingress_private_ip, amx_ingress_dport, amx_ingress_sport
+            )
+            exports_ok = exports_ok and ok
+            session_changed = session_changed or changed
+        else:
+            print("Skipping AMI-to-AMX export (no AMX ingress private IP available).")
+
+    if not exports_ok:
+        # Force the caller (retry_until_true) to retry the whole function: a
+        # deployed-but-missing-a-destination session must not be reported as
+        # fully successful.
+        return False
+
+    if details.get("deployed") and not session_changed:
+        print("Monitoring session already deployed.")
+        return True
+    return deploy_monitoring_session(session_id)
+
+
 def push_node_config(token, fqdn, node_name, service_name, group_name, subgroup_name, step_label):
     """Pushes the registration token and config to a node via SSH."""
     if not fqdn:
@@ -451,12 +1439,30 @@ def push_node_config(token, fqdn, node_name, service_name, group_name, subgroup_
     except Exception as e:
         print(f"  [ERROR] Unhandled exception during SSH: {e}")
 
+def push_all_node_configs(token):
+    """Registers UCTV, vSeries, and AMX nodes in parallel via SSH."""
+    nodes = [
+        (UCTV_CONTROLLER_FQDN, "UCTV Controller", "uctv-cntlr", FM_GROUP, FM_SUBGROUP, "Step 2/5"),
+        (VSERIES_FQDN, "vSeries Node", "vseries-node", FM_GROUP, FM_SUBGROUP, "Step 3/5"),
+        (AMX_FQDN, "AMX Node", "vseries-node", AMX_FM_GROUP, AMX_FM_SUBGROUP, "Step 4/5")
+    ]
+    
+    print("\n--- Registering virtual appliance nodes in parallel via SSH ---")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(nodes)) as executor:
+        futures = [
+            executor.submit(push_node_config, token, fqdn, name, service, grp, subgrp, label)
+            for fqdn, name, service, grp, subgrp, label in nodes
+        ]
+        concurrent.futures.wait(futures)
+
 def restart_ubuntu_agents():
-    """Restarts the UCTV agent on the production Ubuntu VMs via SSH."""
-    print(f"\n--- Step 5/5: Restart Ubuntu UCTV Agents via SSH ---")
-    for fqdn, name in [(PROD1_FQDN, "prod-ubuntu-1"), (PROD2_FQDN, "prod-ubuntu-2")]:
+    """Restarts the UCTV agent on the production Ubuntu VMs via SSH in parallel."""
+    print(f"\n--- Step 5/5: Restart Ubuntu UCTV Agents via SSH in parallel ---")
+    targets = [(PROD1_FQDN, "prod-ubuntu-1"), (PROD2_FQDN, "prod-ubuntu-2")]
+    
+    def restart_one(fqdn, name):
         if not fqdn:
-            continue
+            return
         print(f"Restarting uctv agent daemon on {name} ({fqdn})...")
         ssh_cmd = [
             "ssh", "-i", KEY_FILE, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10",
@@ -470,6 +1476,10 @@ def restart_ubuntu_agents():
             print(f"  [WARNING] SSH command timed out on {name}. The agent may still be restarting.")
         except Exception as e:
             print(f"  [WARNING] Could not restart agent on {name}. It may restart automatically later via timer.")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(targets)) as executor:
+        futures = [executor.submit(restart_one, fqdn, name) for fqdn, name in targets]
+        concurrent.futures.wait(futures)
 
 def check_service_status(fqdn, service_name, user=ADMIN_USER):
     """Checks if a systemd service is active on a remote VM via SSH."""
@@ -615,6 +1625,7 @@ def main():
     # Domain 1: Main
     if domain_exists:
         print(f"Monitoring Domain '{monitoring_domain}' already exists. Skipping creation.")
+        domain_id = get_monitoring_domain_id(monitoring_domain)
     else:
         print(f"Creating Monitoring Domain '{monitoring_domain}'...")
         domain_id = create_monitoring_domain(monitoring_domain)
@@ -626,6 +1637,7 @@ def main():
     # Domain 2: AMX
     if amx_domain_exists:
         print(f"Monitoring Domain '{AMX_FM_GROUP}' already exists. Skipping creation.")
+        amx_domain_id = get_monitoring_domain_id(AMX_FM_GROUP)
     else:
         print(f"Creating Monitoring Domain '{AMX_FM_GROUP}'...")
         amx_domain_id = create_monitoring_domain(AMX_FM_GROUP)
@@ -634,17 +1646,38 @@ def main():
         else:
             print(f"\n[WARNING] Monitoring Domain '{AMX_FM_GROUP}' creation failed or skipped.")
 
-    # 3. Register the UCTV node via SSH
-    push_node_config(agent_token, UCTV_CONTROLLER_FQDN, "UCTV Controller", "uctv-cntlr", FM_GROUP, FM_SUBGROUP, "Step 2/5")
+    # Create the (still empty) monitoring sessions now, so their node lists
+    # can be polled below - deploying/binding them happens further down, once
+    # each session's node is confirmed registered.
+    session_id = create_monitoring_session(domain_id, subgroup_name, "Azure-Lab-Session") if domain_id else None
+    ami_session_id = (
+        create_monitoring_session(amx_domain_id, AMX_FM_SUBGROUP, "Azure-AMX-Session") if amx_domain_id else None
+    )
 
-    # 4. Register the vSeries node via SSH
-    push_node_config(agent_token, VSERIES_FQDN, "vSeries Node", "vseries-node", FM_GROUP, FM_SUBGROUP, "Step 3/5")
-
-    # 5. Register the AMX node via SSH
-    push_node_config(agent_token, AMX_FQDN, "AMX Node", "vseries-node", AMX_FM_GROUP, AMX_FM_SUBGROUP, "Step 4/5")
+    # 3-5. Register the UCTV, vSeries, and AMX nodes in parallel via SSH. This
+    # has to happen before session deploy/interface-binding below, since FM
+    # rejects both until the corresponding node has finished registering.
+    push_all_node_configs(agent_token)
 
     # 6. Restart the production Ubuntu agents to force immediate registration
     restart_ubuntu_agents()
+
+    # Wait for each node to register, then build/deploy its session. A single
+    # run of this script is now self-sufficient - no need to notice a 409 and
+    # re-invoke it once nodes come online.
+    if session_id:
+        wait_for_vseries_node(session_id, "vSeries node")
+        retry_until_true(
+            lambda: configure_monitoring_session_flow(session_id, TOOL_VM_PRIVATE_IP, AMX_INGRESS_PRIVATE_IP),
+            "main session flow (map/tunnel/AMI app/deploy)",
+        )
+
+    if ami_session_id:
+        wait_for_vseries_node(ami_session_id, "AMX node")
+        retry_until_true(
+            lambda: configure_ami_monitoring_session_flow(ami_session_id),
+            "AMX session flow (raw endpoints/interface binding/deploy)",
+        )
 
     print("\n" + "="*60)
     print("Configuration Complete!")

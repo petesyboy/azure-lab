@@ -194,26 +194,7 @@ def fetch_and_fix_ssh_key():
         print(f"[!] Warning: Could not normalise line endings in {key_file}: {e}")
 
     # ── Step 4: Windows-only — convert OpenSSH format → RSA PEM ─────────────
-    # Windows OpenSSH cannot reliably load "BEGIN OPENSSH PRIVATE KEY" files.
-    # ssh-keygen -p -m pem converts in-place.  It requires the file to be
-    # accessible only by the owner (guaranteed by _win_unlock_key above).
-    if os.name == 'nt':
-        print(f"[*] Converting key to RSA PEM format for Windows SSH compatibility...")
-        try:
-            result = subprocess.run(
-                ["ssh-keygen", "-p", "-m", "pem", "-f", key_file, "-P", "", "-N", ""],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                print(f"[*] Key converted to RSA PEM format successfully.")
-            else:
-                print(f"[!] Warning: ssh-keygen conversion returned code {result.returncode}.")
-                if result.stderr:
-                    print(f"    {result.stderr.strip()}")
-        except FileNotFoundError:
-            print(f"[!] Warning: ssh-keygen not found. Ensure the Windows OpenSSH Feature is installed.")
-        except Exception as e:
-            print(f"[!] Warning: Could not convert key format: {e}")
+    # (Skipped: Keys are natively generated in standard PEM format in keys.tf)
 
     # ── Step 5: Final permission lock-down ───────────────────────────────────
     print(f"[*] Locking down permissions for {key_file}...")

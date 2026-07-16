@@ -10,7 +10,7 @@ resource "tls_private_key" "lab_key" {
 
 resource "azurerm_key_vault_secret" "lab_key" {
   name         = "lab-ssh-private-key"
-  value        = tls_private_key.lab_key.private_key_openssh
+  value        = tls_private_key.lab_key.private_key_pem
   key_vault_id = azurerm_key_vault.fm_token_kv.id
 
   depends_on = [
@@ -19,7 +19,7 @@ resource "azurerm_key_vault_secret" "lab_key" {
 }
 
 resource "local_sensitive_file" "lab_key_pem" {
-  content         = tls_private_key.lab_key.private_key_openssh
+  content         = tls_private_key.lab_key.private_key_pem
   filename        = "${path.module}/lab_key.pem"
   file_permission = "0400"
 }

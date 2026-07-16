@@ -95,25 +95,33 @@ az keyvault secret set --vault-name $KV_NAME --name $SECRET_NAME --value "<PASTE
 ```
 *Note: Agents automatically fetch this token from the Key Vault via managed identity to self-register. They will continually retry every 60 seconds until a valid token is found.*
 
-## Create the Monitoring Session
+## Monitoring Session (Automated)
 
-To start inspecting traffic, you must instruct the Gigamon fabric how to route traffic from the UCT-V agents to the Tool VM.
+`scripts/configure_lab.py` fully automates both Monitoring Sessions — no manual steps in the FM UI are required. It's idempotent throughout: re-running it detects whatever already exists (domain, session, map, tunnel, app, link) and only creates/deploys what's missing, so it's always safe to run again.
 
-1. Login to **GigaVUE-FM**.
-2. In the left navigation pane, go to **Traffic** > **Virtual** > **Orchestrated Flows** > **Azure** (or **Monitor** > **Monitoring Session** depending on your UI version).
-3. Click **New Session** (or **Create**).
-4. **Session Name**: Enter a descriptive name (e.g., `Azure-Lab-Session`).
-5. **Select Source**: Choose the `Azure-3PO-Connection` (or the connection you specified in your variables) and select the Production VMs running the UCT-V agents as the target source.
-6. **Configure the Map (Traffic Rules)**:
-   - Create a new map to define what traffic to capture.
-   - To capture all IPv4 traffic, add a rule where **Type** = `MacV4` (or `IPv4`), **Source/Dest** = `Any`, and set the action to **Pass**.
-7. **Configure the Tunnel (Destination)**:
-   - Create or drag a new tunnel endpoint onto the canvas to act as the destination for your map.
-   - **Tunnel Type**: `VXLAN`
-   - **Destination IP**: Enter the **Private IP address of the Tool VM** (find this in the Terraform outputs).
-   - **Destination Port**: `4789`
-   - **Tunnel ID (VNI)**: `123` *(CRITICAL: The Tool VM's automated configuration explicitly expects VNI `123`. If this does not match, ntopng will not see the traffic!)*
-8. **Link and Deploy**: Connect your source, map, and tunnel endpoint in the visual canvas. Click **Save** or **Deploy** to push the configuration to the vSeries nodes.
+It's also self-healing across a fresh deploy: FM rejects a session deploy or link change until the corresponding vSeries/AMX node has finished registering, which lags a few minutes behind the SSH-based node registration. Rather than requiring a second manual invocation, the script waits for each node to appear registered and then retries the session build/deploy until it succeeds (bounded timeout, ~5 minutes).
+
+### Main session — `Azure-Lab-Session` (vSeries node, domain `Azure-3PO-MD`)
+
+1. Creates the Monitoring Domain and AnyCloud Connection.
+2. Creates the session and a traffic map with a pass-all-IPv4 rule.
+3. **Branch A — raw packet mirror**: creates a VXLAN tunnel to the Tool VM's private IP, port `4789`, VNI `123` *(the Tool VM's automated configuration expects VNI `123` — do not change without updating both sides)*, and links the map to it. Feeds ntopng / raw `tcpdump` on the Tool VM.
+4. **Branch B — metadata pipeline**: adds the AMI ("Application Metadata Intelligence" / `appmetadata`) GigaSMART app to the map, using the `SplunkMetadataTemplate` export profile (CEF-formatted, per-protocol field extraction for krb5/ssh/ssl/ftp/smb/smtp/dhcp/dns/telnet/rdp/http). The AMI app exports to two UDP destinations:
+   - **Elastic**: the Tool VM's Logstash listener, port `1514` (already provisioned with a CEF codec writing into the `gigamon-ami-*` Elasticsearch index — see [Verify AMI](#4-verify-application-metadata-intelligence-ami) below).
+   - **AMX-Ingress**: the AMX node's ingress data interface (`eth1`), so the same metadata also reaches the AMX session below.
+5. Deploys the session.
+
+### AMX session — `Azure-AMX-Session` (AMX node, domain `Azure-3PO-AMX`)
+
+1. Creates the Monitoring Domain and AnyCloud Connection.
+2. Creates the session and a traffic map.
+3. Creates `Ingress-Raw-Endpoint` and `Egress-Raw-Endpoint` entities and links them as Ingress → Map → Egress.
+4. Binds the raw endpoints to the AMX node's two data interfaces (`eth1`/`eth2`) via `endpointIfaceMappings`.
+5. Deploys the session.
+
+**Status: not yet complete.** The AMX node currently receives the CEF metadata (from the main session's AMI app, above) on its ingress interface, but nothing yet converts it to JSON or forwards it onward — the AMX-side GigaSMART app and the final Cribl destination on the egress interface are still unconfigured, pending the Cribl endpoint details and a corresponding FM UI capture. Once available, the egress tunnel to Cribl follows the same `create_udp_tunnel()` pattern already used for Elastic.
+
+If you need to build the session manually instead (e.g. for a custom traffic rule), use **Traffic** > **Virtual** > **Orchestrated Flows** > **Azure** in the FM UI and mirror the steps above.
 
 ## Usage & Verification
 
@@ -158,7 +166,7 @@ A Python script is provided to generate a high volume of UDP messages to the net
 ### 4. Verify Application Metadata Intelligence (AMI)
 - **Kibana**: Access `http://<tool_vm_public_ip>:5601`.
 - Create a Data View in Kibana matching `gigamon-ami-*` to visualize the parsed metadata records.
-- In **GigaVUE-FM**, configure your AMX node to export metadata via **UDP/JSON** to the Tool VM's private IP on port `1514`.
+- This is fully automated (see [Monitoring Session (Automated)](#monitoring-session-automated) above) — no manual FM configuration needed. Traffic should already be flowing once `configure_lab.py` completes.
 
 ---
 
@@ -169,6 +177,14 @@ A Python script is provided to generate a high volume of UDP messages to the net
 **Configuration Script Fails (SSH Delay):**
 If the final step of the deployment script (`configure_lab.py`) fails due to an SSH timeout (VMs are fully provisioned but SSH daemons are not yet responsive), the underlying infrastructure was still successfully deployed. You can safely retry the post-deployment SSH configuration at any time by running:
 `python scripts/configure_lab.py`
+
+**vSeries/AMX Node Landed on Unsupported Hardware (MANA):**
+Gigamon's DPDK build doesn't yet support Azure's newer MANA network adapter. If a vSeries or AMX node's data interface fails to bind (`dpdk-devbind.py --status` shows it `unused` rather than bound to a kernel driver, and `vseries-node` logs repeat `Error: No devices specified`), the VM landed on MANA-capable hardware. All Gigamon Marketplace VMs in this repo carry the `LegacyVMNVA` tag (Azure's documented NVA opt-out — see [modules/gigamon-vm/main.tf](modules/gigamon-vm/main.tf)), which should prevent this on a fresh deploy. If it still happens, force a re-placement:
+```bash
+az vm deallocate --resource-group <rg_name> --name <vm_name>
+az vm start --resource-group <rg_name> --name <vm_name>
+```
+A `reapply` alone is not sufficient — it only re-asserts the tag on the VM's *current* allocation, it doesn't trigger a fresh hardware placement decision.
 
 ## Support & Contact
 For questions, issues, or contributions regarding this lab configuration, please reach out to:

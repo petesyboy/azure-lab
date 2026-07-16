@@ -117,9 +117,19 @@ resource "azurerm_virtual_machine" "vm" {
   }
 
   tags = {
-    Role    = var.role_tag
-    owner   = var.owner_email
-    Project = var.project_tag
+    Role           = var.role_tag
+    owner          = var.owner_email
+    Project        = var.project_tag
+    Owner          = "pete.connolly@gigamon.com"
+    Team           = "EMEA-SE"
+    Purpose        = "EMES-SE-Lab"
+    "Hours Needed" = "Always"
+    DO_NOT_DELETE  = "DO_NOT_DELETE"
+    # Gigamon's DPDK-based appliances don't yet support Azure's MANA NIC; this
+    # opts the VM out of MANA-capable hardware placement (Azure-documented
+    # exception, honored until 2027-05-31). See:
+    # https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-network-virtual-appliance-opt-out
+    LegacyVMNVA = "true"
   }
 }
 
