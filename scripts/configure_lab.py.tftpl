@@ -656,6 +656,62 @@ def create_vxlan_tunnel(session_id, tunnel_alias, remote_ip, vni=123, dport=4789
     return None
 
 
+def create_udp_tunnel(session_id, tunnel_alias, remote_ip, dport, sport=23384):
+    """Creates a plain UDP tunnel spec (e.g. for CEF export to Logstash) and attaches it to the session."""
+    spec_url = f"{FM_URL}/api/v1.3/cloud/tunnelSpecs"
+    spec_payload = {
+        "alias": tunnel_alias,
+        "type": "udp",
+        "trafficDirection": "out",
+        "remoteIP": remote_ip,
+        "dscp": "0",
+        "flowLabel": "0",
+        "mtu": 1500,
+        "sport": sport,
+        "dport": str(dport),
+    }
+    try:
+        resp = requests.post(spec_url, json=spec_payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 201):
+            tunnel_spec = resp.json()
+            print(f"Created tunnel spec '{tunnel_alias}' (ID: {tunnel_spec.get('id')}).")
+        elif resp.status_code == 409:
+            print(f"Tunnel spec '{tunnel_alias}' already exists. Reusing it.")
+            tunnel_spec = get_tunnel_spec_by_alias(tunnel_alias)
+            if not tunnel_spec:
+                print(f"[ERROR] Tunnel spec '{tunnel_alias}' exists but could not be retrieved.")
+                return None
+        else:
+            print(f"[ERROR] Failed to create tunnel spec. API returned {resp.status_code}: {resp.text}")
+            return None
+    except Exception as e:
+        print(f"Error creating tunnel spec: {e}")
+        return None
+
+    update_url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    update_payload = {
+        "requests": [
+            {"entityType": "tunnel", "operation": "create", "tunnel": tunnel_spec}
+        ]
+    }
+    try:
+        resp = requests.post(update_url, json=update_payload, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code in (200, 202):
+            data = resp.json()
+            for op in data.get("operationResponses", []):
+                if op.get("entityType") == "tunnel" and op.get("status") == "success":
+                    tunnel_id = op.get("id")
+                    print(f"Attached tunnel '{tunnel_alias}' to session (ID: {tunnel_id}).")
+                    set_entity_position(session_id, tunnel_id, 1100, 470)
+                    return tunnel_id
+            print(f"[ERROR] Tunnel attach did not return success: {data}")
+        else:
+            print(f"[ERROR] Failed to attach tunnel to session. API returned {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Error attaching tunnel to session: {e}")
+    return None
+
+
 def link_map_to_tunnel(session_id, map_id, tunnel_id, aep_id=2):
     """Links the traffic map to the tunnel destination on the monitoring session canvas."""
     url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
@@ -1086,8 +1142,23 @@ def configure_ami_monitoring_session_flow(
     return True
 
 
-def configure_monitoring_session_flow(session_id, tool_vm_private_ip, map_name="Azure-Lab-Map", tunnel_alias="NtopNG"):
-    """Builds the map -> tunnel flow on an existing (empty) monitoring session and deploys it."""
+def configure_monitoring_session_flow(
+    session_id,
+    tool_vm_private_ip,
+    map_name="Azure-Lab-Map",
+    tunnel_alias="NtopNG",
+    elastic_tunnel_alias="Elastic",
+    elastic_dport=1514,
+    elastic_sport=23384,
+):
+    """
+    Builds the main session's flow and deploys it:
+      Map -> NtopNG (VXLAN tunnel)          - raw packet mirror
+      Map -> AMI application -> Elastic (UDP tunnel to Logstash, port 1514)
+
+    Looks entities up by alias/relationship (not list position) since the
+    session now holds multiple tunnels and links once both destinations exist.
+    """
     if not session_id:
         print("Skipping monitoring session flow configuration (No Session ID).")
         return False
@@ -1095,9 +1166,19 @@ def configure_monitoring_session_flow(session_id, tool_vm_private_ip, map_name="
         print("Skipping monitoring session flow configuration (No Tool VM private IP).")
         return False
 
-    # Resume from whatever partial state the session is in (map/tunnel/link may
-    # each already exist from a previous run).
+    # Resume from whatever partial state the session is in (any entity below
+    # may already exist from a previous run).
     details = get_monitoring_session_details(session_id)
+    existing_tunnels = details.get("tunnels") or []
+    existing_links = details.get("links") or []
+    session_changed = False
+
+    def find_link(source_id, dest_id):
+        return next(
+            (l for l in existing_links
+             if l.get("source", {}).get("id") == source_id and l.get("dest", {}).get("id") == dest_id),
+            None,
+        )
 
     existing_maps = details.get("trafficMaps") or []
     if existing_maps:
@@ -1105,38 +1186,67 @@ def configure_monitoring_session_flow(session_id, tool_vm_private_ip, map_name="
         print(f"Traffic map already on session (ID: {map_id}). Reusing it.")
     else:
         map_id = create_traffic_map(session_id, map_name)
+        session_changed = True
 
-    existing_tunnels = details.get("tunnels") or []
-    if existing_tunnels:
-        tunnel_id = existing_tunnels[0].get("id")
+    vxlan_tunnel = next((t for t in existing_tunnels if t.get("alias") == tunnel_alias), None)
+    if vxlan_tunnel:
+        tunnel_id = vxlan_tunnel.get("id")
         print(f"Tunnel already on session (ID: {tunnel_id}). Reusing it.")
     else:
         tunnel_id = create_vxlan_tunnel(session_id, tunnel_alias, tool_vm_private_ip)
+        session_changed = True
 
     if not map_id or not tunnel_id:
         print("[ERROR] Could not complete monitoring session flow (map/tunnel creation failed).")
         return False
 
-    existing_links = details.get("links") or []
-    if existing_links:
+    if find_link(map_id, tunnel_id):
         print("Map-to-tunnel link already on session. Reusing it.")
     elif not link_map_to_tunnel(session_id, map_id, tunnel_id):
         print("[ERROR] Could not complete monitoring session flow (link creation failed).")
         return False
+    else:
+        session_changed = True
 
     # AMI (Application Metadata Intelligence) app - exports CEF metadata records
-    # via the "SplunkMetadataTemplate" profile. Destination (e.g. Cribl) is not
-    # yet configured here - see create_ami_application()'s docstring.
+    # via the "SplunkMetadataTemplate" profile, out to the "Elastic" UDP tunnel
+    # (Logstash on the Tool VM, port 1514). Cribl can reuse this same pattern
+    # once its endpoint is known - just another UDP (or type-appropriate)
+    # tunnel linked from the same application.
     existing_apps = details.get("applications") or []
-    newly_added_app = False
     if existing_apps:
-        print(f"AMI application already on session (ID: {existing_apps[0].get('id')}). Reusing it.")
-    elif create_ami_application(session_id, map_id):
-        newly_added_app = True
+        app_id = existing_apps[0].get("id")
+        print(f"AMI application already on session (ID: {app_id}). Reusing it.")
     else:
-        print("[WARNING] Could not create AMI application - continuing without it.")
+        app_id = create_ami_application(session_id, map_id)
+        if app_id:
+            session_changed = True
+        else:
+            print("[WARNING] Could not create AMI application - continuing without it.")
 
-    if details.get("deployed") and not newly_added_app:
+    if app_id:
+        elastic_tunnel = next((t for t in existing_tunnels if t.get("alias") == elastic_tunnel_alias), None)
+        if elastic_tunnel:
+            elastic_tunnel_id = elastic_tunnel.get("id")
+            print(f"Elastic tunnel already on session (ID: {elastic_tunnel_id}). Reusing it.")
+        else:
+            elastic_tunnel_id = create_udp_tunnel(
+                session_id, elastic_tunnel_alias, tool_vm_private_ip, elastic_dport, elastic_sport
+            )
+            if elastic_tunnel_id:
+                session_changed = True
+
+        if elastic_tunnel_id:
+            if find_link(app_id, elastic_tunnel_id):
+                print("AMI-to-Elastic link already on session. Reusing it.")
+            elif create_session_link(session_id, app_id, "application", elastic_tunnel_id, "tunnel", source_aep_id=2):
+                session_changed = True
+            else:
+                print("[WARNING] Could not link AMI application to Elastic tunnel.")
+        else:
+            print("[WARNING] Could not create Elastic tunnel - AMI export destination not configured.")
+
+    if details.get("deployed") and not session_changed:
         print("Monitoring session already deployed.")
         return True
     return deploy_monitoring_session(session_id)
