@@ -505,6 +505,7 @@ resource "local_file" "configure_script" {
     fm_internal_name     = module.fm.private_ip
     uctv_internal_name   = module.uctv_controller.private_ip
     tool_vm_private_ip   = module.tool_vm.private_ip
+    tool_vm_fqdn         = module.tool_vm.public_ip
     amx_ingress_private_ip = module.amx.secondary_private_ip
     cribl_endpoint       = var.cribl_endpoint
     cribl_auth_token     = var.cribl_auth_token

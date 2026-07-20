@@ -67,7 +67,7 @@ def check_uctv_deb():
                                 var_content = f.read()
                             
                             pattern = r'(variable\s+"gigamon_version"\s+\{[^}]*default\s*=\s*")([^"]+)(")'
-                            updated_content = re.sub(pattern, rf'\1{detected_major_minor}\3', var_content, flags=re.DOTALL)
+                            updated_content = re.sub(pattern, rf'\g<1>{detected_major_minor}\g<3>', var_content, flags=re.DOTALL)
                             
                             with open("variables.tf", "w") as f:
                                 f.write(updated_content)
@@ -279,7 +279,7 @@ def bootstrap_remote_state():
         f"owner={email}",
         f"Project={project}",
         "Environment=demo",
-        "hours needed=8",
+        "Hours Needed=Always",
         "DeploymentType=connolly-demo"
     ]
 

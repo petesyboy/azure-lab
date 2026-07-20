@@ -137,7 +137,7 @@ variable "tool_vm_size" {
 variable "gigamon_version" {
   type        = string
   description = "The major.minor version of the Gigamon Cloud Suite to deploy (e.g., '6.13', '6.14'). Defaults to the latest supported release, 6.14; set to '6.13' to pin the previous release."
-  default     = "6.14"
+  default     = "6.13"
 
   validation {
     condition     = can(regex("^6\\.\\d{2}$", var.gigamon_version))
