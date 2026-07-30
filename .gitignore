@@ -18,6 +18,7 @@ venv/
 lab_key.pem
 scripts/configure_lab.py
 UCTV-files/
+vmware/.nocloud/
 
 # Logs and Temp
 git_log.txt

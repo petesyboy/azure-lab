@@ -1,0 +1,36 @@
+# Copy this file to terraform.tfvars and fill in the real values there.
+# terraform.tfvars matches the repo's *.tfvars gitignore rule and will never
+# be committed - this .example file does NOT match that rule (the .example
+# suffix means it doesn't end in .tfvars), so never put real secrets here.
+
+# -----------------------------------------------------------------------
+# vCenter connection
+# -----------------------------------------------------------------------
+vsphere_server   = "192.168.0.47"
+vsphere_user     = "administrator@vsphere.local" # a scoped account is better long-term - see README.md
+vsphere_password = "" # fill in on the terraform.tfvars copy, never here
+
+# -----------------------------------------------------------------------
+# vCenter inventory targets
+# -----------------------------------------------------------------------
+datacenter = "Datacenter" # confirm the exact name in vCenter - "Datacenter" is vSphere's default
+esxi_host  = "192.168.0.45"
+datastore  = "HardDrive" # the datastore with more free space (3,087GB vs 223.6GB on datastore1)
+
+# Must already exist in vCenter with open-vm-tools installed.
+ubuntu_template_name = "" # fill in - e.g. "ubuntu-22.04-template"
+
+# network_name defaults to "VM Network" already (see variables.tf) - only
+# set it here if this environment's port group is named differently.
+
+# Optional: your own SSH public key, added alongside the generated
+# lab_key.pem. Public keys aren't secret, so this is fine to fill in here
+# too if you want the example file to double as a real starting point.
+# admin_ssh_public_key = "ssh-ed25519 AAAA..."
+
+# -----------------------------------------------------------------------
+# VM sizing - defaults (1 vCPU / 1GB) are already fine for this host's
+# free capacity; only override if you want something different.
+# -----------------------------------------------------------------------
+# prod_num_cpus  = 1
+# prod_memory_mb = 1024
