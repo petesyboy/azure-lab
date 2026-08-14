@@ -37,6 +37,13 @@ variable "gigamon_email" {
   default     = "pete.connolly@gigamon.com"
 }
 
+variable "fm_new_admin_password" {
+  type        = string
+  sensitive   = true
+  default     = "Gigamon123!!!"
+  description = "New FM admin password the deploy script sets automatically after first login, replacing the vendor default. Override via terraform.tfvars for anything beyond a disposable lab."
+}
+
 # -----------------------------------------------------------------------------
 # FM Configuration & Credentials
 # -----------------------------------------------------------------------------

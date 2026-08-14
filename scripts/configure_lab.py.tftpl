@@ -8,6 +8,7 @@ import subprocess
 import shutil
 import argparse
 import concurrent.futures
+from datetime import datetime, timezone, timedelta
 
 # Suppress insecure request warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -36,6 +37,8 @@ AMX_INGRESS_PRIVATE_IP = "${amx_ingress_private_ip}"
 CRIBL_ENDPOINT = "${cribl_endpoint}"
 CRIBL_AUTH_TOKEN = "${cribl_auth_token}"
 ADMIN_USER = "${admin_username}"
+FM_DEFAULT_PASSWORD = "admin123A!!"  # Vendor default this repo's FM AMI ships with
+FM_NEW_ADMIN_PASSWORD = "${fm_new_admin_password}"
 
 # Azure Key Vault (optional convenience for local script)
 # If you uploaded the FM token to Key Vault, this script can read it using Azure CLI.
@@ -189,12 +192,120 @@ def get_existing_token_from_kv(az_cmd):
         pass
     return None
 
+def _fm_legacy_login_cookie(password):
+    """
+    Logs into FM's legacy 0.9 admin API and returns the FMSESSIONID cookie,
+    or None on failure. Retries once after a short delay - some corporate
+    proxies (Netskope etc.) interfere with self-signed certs intermittently.
+    """
+    url = f"{FM_URL}/api/0.9/admin/login?j_username=admin&j_password={password}"
+    try:
+        resp = requests.post(url, verify=False, timeout=15)
+        if not resp.ok:
+            time.sleep(1)
+            resp = requests.post(url, verify=False, timeout=15)
+        if resp.ok:
+            return resp.cookies.get("FMSESSIONID")
+    except requests.exceptions.RequestException:
+        pass
+    return None
+
+def change_fm_password_and_get_token(old_password, new_password, token_name="tf-auto-tok"):
+    """
+    Automates what used to be a manual step: log in with the vendor default
+    password, change it to new_password if not already done, then create
+    (or reuse) an API token - all via FM's REST API. Never raises/exits;
+    returns None on any failure so the caller can fall back to the manual
+    prompt.
+    """
+    print("\n[*] Attempting automated password change + token creation...")
+
+    # Try the known default password first; if that's rejected, the password
+    # may already have been changed by an earlier run of this script - try
+    # the new password too before giving up (keeps this idempotent, like
+    # the rest of this script already is).
+    cookie = _fm_legacy_login_cookie(old_password)
+    already_changed = cookie is None
+    if cookie is None:
+        cookie = _fm_legacy_login_cookie(new_password)
+
+    if cookie is None:
+        print("[!] Automated login failed with both the default and new password.")
+        return None
+
+    session = requests.Session()
+    session.headers.update({
+        "Content-Type": "application/json;charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest",
+    })
+    session.cookies.set("FMSESSIONID", cookie)
+    session.verify = False
+
+    if not already_changed:
+        print("[*] Changing default FM password...")
+        resp = session.put(
+            f"{FM_URL}/api/v1.3/user/pwd",
+            data=json.dumps({"oldPwd": old_password, "newPwd": new_password}),
+            timeout=15,
+        )
+        if not resp.ok:
+            print(f"[!] Automated password change failed (HTTP {resp.status_code}).")
+            return None
+        print("[+] FM password changed automatically.")
+
+    print("[*] Fetching/creating FM API token automatically...")
+    token_id = None
+    try:
+        resp = session.get(f"{FM_URL}/api/v1.3/tokens", timeout=15)
+        if resp.ok:
+            utc_plus_24 = datetime.now(timezone.utc) + timedelta(hours=24)
+            for tok in resp.json().get("fmUserTokenEntities", []):
+                expiry = datetime.strptime(
+                    tok["estimatedExpiryTimestamp"], "%Y-%m-%dT%H:%M:%S.%fZ"
+                ).replace(tzinfo=timezone.utc)
+                if utc_plus_24.timestamp() < expiry.timestamp():
+                    token_id = tok["tokenId"]
+                    break
+    except Exception:
+        pass
+
+    if token_id is None:
+        create_payload = {"tokenName": token_name, "expiryTime": "105", "groups": ["Super Admin Group"]}
+        resp = session.post(f"{FM_URL}/api/v1.3/tokens/create", data=json.dumps(create_payload), timeout=15)
+        if not resp.ok:
+            print(f"[!] Automated token creation failed (HTTP {resp.status_code}).")
+            return None
+        token_id = resp.json().get("tokenId")
+
+    if token_id is None:
+        print("[!] Could not determine a token ID to retrieve.")
+        return None
+
+    resp = session.get(f"{FM_URL}/api/v1.3/tokens/view?tokenId={token_id}", timeout=15)
+    if not resp.ok:
+        print(f"[!] Could not retrieve token value (HTTP {resp.status_code}).")
+        return None
+
+    token = resp.json().get("token")
+    if token:
+        print("[+] FM API token obtained automatically - no manual login required.")
+    return token
+
 def get_auth_token():
     """
-    Cleans up any existing token in Key Vault, then prompts the user
-    to enter the GigaVUE-FM API token directly and uploads it.
+    Automates the FM password change + token creation via the REST API,
+    uploading the result to Key Vault same as the manual path did. Falls
+    back to the manual GUI + paste-a-token prompt only if that fails.
     """
     az_cmd = shutil.which("az") or ("az.cmd" if os.name == 'nt' else "az")
+
+    token = change_fm_password_and_get_token(FM_DEFAULT_PASSWORD, FM_NEW_ADMIN_PASSWORD)
+    if token:
+        delete_keyvault_secret(az_cmd)
+        upload_token_to_keyvault(az_cmd, token)
+        return token
+
+    print("[!] Automated setup failed - falling back to manual steps.")
     delete_keyvault_secret(az_cmd)
 
     print("\n" + "!"*60)
@@ -203,7 +314,7 @@ def get_auth_token():
     print("2. Go to Administration -> User Management -> Tokens")
     print("3. Generate a new token (e.g., 105 days, Super Admin Group)")
     print("!"*60 + "\n")
-    
+
     token = input("Paste your FM API Token here: ").strip()
     if not token:
         print("Error: Token cannot be empty.")

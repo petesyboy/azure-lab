@@ -358,9 +358,9 @@ module "amx" {
   create_secondary_nic = true
 
   # Third NIC for data-plane (connects to production subnet)
-  third_subnet_id      = module.networking.production_subnet_id
-  third_nic_name       = "nic-amx-data2"
-  create_third_nic     = true
+  third_subnet_id  = module.networking.production_subnet_id
+  third_nic_name   = "nic-amx-data2"
+  create_third_nic = true
 }
 
 # Cloud-init scripts for all VMs are defined in locals.tf
@@ -491,26 +491,27 @@ resource "azurerm_role_assignment" "storage_blob_readers" {
 resource "local_file" "configure_script" {
   filename = "${path.module}/scripts/configure_lab.py"
   content = templatefile("${path.module}/scripts/configure_lab.py.tftpl", {
-    fm_group             = var.fm_group_name
-    fm_subgroup          = var.fm_subgroup_name
-    amx_fm_group         = var.amx_fm_group_name
-    amx_fm_subgroup      = var.amx_fm_subgroup_name
-    admin_username       = var.admin_username
-    fm_fqdn              = module.fm.public_ip
-    vseries_fqdn         = module.vseries.public_ip
-    amx_fqdn             = module.amx.public_ip
-    uctv_controller_fqdn = module.uctv_controller.public_ip
-    prod1_fqdn           = module.prod1.public_ip
-    prod2_fqdn           = module.prod2.public_ip
-    fm_internal_name     = module.fm.private_ip
-    uctv_internal_name   = module.uctv_controller.private_ip
-    tool_vm_private_ip   = module.tool_vm.private_ip
-    tool_vm_fqdn         = module.tool_vm.public_ip
+    fm_group               = var.fm_group_name
+    fm_subgroup            = var.fm_subgroup_name
+    amx_fm_group           = var.amx_fm_group_name
+    amx_fm_subgroup        = var.amx_fm_subgroup_name
+    admin_username         = var.admin_username
+    fm_fqdn                = module.fm.public_ip
+    vseries_fqdn           = module.vseries.public_ip
+    amx_fqdn               = module.amx.public_ip
+    uctv_controller_fqdn   = module.uctv_controller.public_ip
+    prod1_fqdn             = module.prod1.public_ip
+    prod2_fqdn             = module.prod2.public_ip
+    fm_internal_name       = module.fm.private_ip
+    uctv_internal_name     = module.uctv_controller.private_ip
+    tool_vm_private_ip     = module.tool_vm.private_ip
+    tool_vm_fqdn           = module.tool_vm.public_ip
     amx_ingress_private_ip = module.amx.secondary_private_ip
-    cribl_endpoint       = var.cribl_endpoint
-    cribl_auth_token     = var.cribl_auth_token
-    key_vault_name       = azurerm_key_vault.fm_token_kv.name
-    fm_token_secret_name = var.fm_token_secret_name
+    cribl_endpoint         = var.cribl_endpoint
+    cribl_auth_token       = var.cribl_auth_token
+    key_vault_name         = azurerm_key_vault.fm_token_kv.name
+    fm_token_secret_name   = var.fm_token_secret_name
+    fm_new_admin_password  = var.fm_new_admin_password
   })
 
   depends_on = [

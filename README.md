@@ -79,13 +79,16 @@ graph TD
   - **Tool VM**: Sink for mirrored traffic, ntopng, ELK stack (Elasticsearch, Logstash, Kibana) for AMI records, and `cef-cribl-relay.py` (see [CEF → Cribl Relay](#cef--cribl-relay) below) (Visibility Subnet).
   - **Production VMs**: Ubuntu workloads for traffic generation (Production Subnet).
 
-## Post-Deployment Configuration (CRITICAL)
-GigaVUE-FM requires a manual password change and token generation before the fabric can register.
+## Post-Deployment Configuration
+
+`scripts/configure_lab.py` automatically changes GigaVUE-FM's default password (`admin` / `admin123A!!`) to `fm_new_admin_password`, creates an API token via FM's REST API, and uploads it to Key Vault — no manual GUI login required. Just run it (or let `runme.ps1`/`runme.sh`/`runme.bat` continue on into it) and it handles the rest.
+
+If the automated attempt fails for any reason (e.g. an unexpected FM API version), it falls back to the old manual flow and prompts you:
 
 1. **Access GigaVUE-FM**: Open `https://<fm_public_ip>` (IP found via `terraform output`).
 2. **Login & Change Password**: Use `admin` / `admin123A!!`. Uncheck SSH Key-Based Auth.
 3. **Generate Token**: Navigate to **Administration → User Management → Tokens → Current User Tokens**. Create a new token (105 days, Super Admin Group) and **copy it**.
-4. **Upload Token to Key Vault**:
+4. **Paste the token** when the script prompts for it, or upload it to Key Vault yourself:
 
 ### Bash / Linux
 ```bash
