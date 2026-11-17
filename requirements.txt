@@ -1,0 +1,4 @@
+requests>=2.31
+pycdlib>=1.14
+PyYAML>=6.0
+pillow>=10.0
