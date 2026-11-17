@@ -15,7 +15,7 @@ __pycache__/
 venv/
 
 # Lab Specific
-lab_key.pem
+*.pem
 scripts/configure_lab.py
 UCTV-files/
 vmware/.nocloud/
