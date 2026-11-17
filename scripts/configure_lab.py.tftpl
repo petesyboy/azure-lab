@@ -8,6 +8,7 @@ import subprocess
 import shutil
 import argparse
 import concurrent.futures
+from datetime import datetime, timezone, timedelta
 
 # Suppress insecure request warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -25,6 +26,7 @@ AMX_FM_GROUP = "${amx_fm_group}"
 AMX_FM_SUBGROUP = "${amx_fm_subgroup}"
 VSERIES_FQDN = "${vseries_fqdn}"
 AMX_FQDN = "${amx_fqdn}"
+TOOL_VM_FQDN = "${tool_vm_fqdn}"
 UCTV_CONTROLLER_FQDN = "${uctv_controller_fqdn}"
 PROD1_FQDN = "${prod1_fqdn}"
 PROD2_FQDN = "${prod2_fqdn}"
@@ -35,6 +37,8 @@ AMX_INGRESS_PRIVATE_IP = "${amx_ingress_private_ip}"
 CRIBL_ENDPOINT = "${cribl_endpoint}"
 CRIBL_AUTH_TOKEN = "${cribl_auth_token}"
 ADMIN_USER = "${admin_username}"
+FM_DEFAULT_PASSWORD = "admin123A!!"  # Vendor default this repo's FM AMI ships with
+FM_NEW_ADMIN_PASSWORD = "${fm_new_admin_password}"
 
 # Azure Key Vault (optional convenience for local script)
 # If you uploaded the FM token to Key Vault, this script can read it using Azure CLI.
@@ -188,12 +192,120 @@ def get_existing_token_from_kv(az_cmd):
         pass
     return None
 
+def _fm_legacy_login_cookie(password):
+    """
+    Logs into FM's legacy 0.9 admin API and returns the FMSESSIONID cookie,
+    or None on failure. Retries once after a short delay - some corporate
+    proxies (Netskope etc.) interfere with self-signed certs intermittently.
+    """
+    url = f"{FM_URL}/api/0.9/admin/login?j_username=admin&j_password={password}"
+    try:
+        resp = requests.post(url, verify=False, timeout=15)
+        if not resp.ok:
+            time.sleep(1)
+            resp = requests.post(url, verify=False, timeout=15)
+        if resp.ok:
+            return resp.cookies.get("FMSESSIONID")
+    except requests.exceptions.RequestException:
+        pass
+    return None
+
+def change_fm_password_and_get_token(old_password, new_password, token_name="tf-auto-tok"):
+    """
+    Automates what used to be a manual step: log in with the vendor default
+    password, change it to new_password if not already done, then create
+    (or reuse) an API token - all via FM's REST API. Never raises/exits;
+    returns None on any failure so the caller can fall back to the manual
+    prompt.
+    """
+    print("\n[*] Attempting automated password change + token creation...")
+
+    # Try the known default password first; if that's rejected, the password
+    # may already have been changed by an earlier run of this script - try
+    # the new password too before giving up (keeps this idempotent, like
+    # the rest of this script already is).
+    cookie = _fm_legacy_login_cookie(old_password)
+    already_changed = cookie is None
+    if cookie is None:
+        cookie = _fm_legacy_login_cookie(new_password)
+
+    if cookie is None:
+        print("[!] Automated login failed with both the default and new password.")
+        return None
+
+    session = requests.Session()
+    session.headers.update({
+        "Content-Type": "application/json;charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest",
+    })
+    session.cookies.set("FMSESSIONID", cookie)
+    session.verify = False
+
+    if not already_changed:
+        print("[*] Changing default FM password...")
+        resp = session.put(
+            f"{FM_URL}/api/v1.3/user/pwd",
+            data=json.dumps({"oldPwd": old_password, "newPwd": new_password}),
+            timeout=15,
+        )
+        if not resp.ok:
+            print(f"[!] Automated password change failed (HTTP {resp.status_code}).")
+            return None
+        print("[+] FM password changed automatically.")
+
+    print("[*] Fetching/creating FM API token automatically...")
+    token_id = None
+    try:
+        resp = session.get(f"{FM_URL}/api/v1.3/tokens", timeout=15)
+        if resp.ok:
+            utc_plus_24 = datetime.now(timezone.utc) + timedelta(hours=24)
+            for tok in resp.json().get("fmUserTokenEntities", []):
+                expiry = datetime.strptime(
+                    tok["estimatedExpiryTimestamp"], "%Y-%m-%dT%H:%M:%S.%fZ"
+                ).replace(tzinfo=timezone.utc)
+                if utc_plus_24.timestamp() < expiry.timestamp():
+                    token_id = tok["tokenId"]
+                    break
+    except Exception:
+        pass
+
+    if token_id is None:
+        create_payload = {"tokenName": token_name, "expiryTime": "105", "groups": ["Super Admin Group"]}
+        resp = session.post(f"{FM_URL}/api/v1.3/tokens/create", data=json.dumps(create_payload), timeout=15)
+        if not resp.ok:
+            print(f"[!] Automated token creation failed (HTTP {resp.status_code}).")
+            return None
+        token_id = resp.json().get("tokenId")
+
+    if token_id is None:
+        print("[!] Could not determine a token ID to retrieve.")
+        return None
+
+    resp = session.get(f"{FM_URL}/api/v1.3/tokens/view?tokenId={token_id}", timeout=15)
+    if not resp.ok:
+        print(f"[!] Could not retrieve token value (HTTP {resp.status_code}).")
+        return None
+
+    token = resp.json().get("token")
+    if token:
+        print("[+] FM API token obtained automatically - no manual login required.")
+    return token
+
 def get_auth_token():
     """
-    Cleans up any existing token in Key Vault, then prompts the user
-    to enter the GigaVUE-FM API token directly and uploads it.
+    Automates the FM password change + token creation via the REST API,
+    uploading the result to Key Vault same as the manual path did. Falls
+    back to the manual GUI + paste-a-token prompt only if that fails.
     """
     az_cmd = shutil.which("az") or ("az.cmd" if os.name == 'nt' else "az")
+
+    token = change_fm_password_and_get_token(FM_DEFAULT_PASSWORD, FM_NEW_ADMIN_PASSWORD)
+    if token:
+        delete_keyvault_secret(az_cmd)
+        upload_token_to_keyvault(az_cmd, token)
+        return token
+
+    print("[!] Automated setup failed - falling back to manual steps.")
     delete_keyvault_secret(az_cmd)
 
     print("\n" + "!"*60)
@@ -202,7 +314,7 @@ def get_auth_token():
     print("2. Go to Administration -> User Management -> Tokens")
     print("3. Generate a new token (e.g., 105 days, Super Admin Group)")
     print("!"*60 + "\n")
-    
+
     token = input("Paste your FM API Token here: ").strip()
     if not token:
         print("Error: Token cannot be empty.")
@@ -1067,16 +1179,49 @@ def create_ami_application(session_id, map_id, alias="AMI-Session", exporter_nam
 
 
 def get_vseries_node_ids(session_id):
-    """Retrieves the vSeries/AMX node IDs currently registered to a monitoring session."""
+    """
+    Retrieves the vSeries/AMX node IDs available for a session: nodes already
+    bound to it, or - if none are bound yet - any healthy node registered on
+    the session's own AnyCloud connection(s).
+
+    A session's own vseriesNodes list only reflects nodes that have already
+    been bound to it via endpointIfaceMappings; a brand-new session has
+    nothing bound yet, so relying on that list alone produces a false
+    "not registered" result even when the node is fully connected at the
+    connection level (confirmed via /cloud/anyCloud/fabricNodes/vseriesNodes
+    and a healthy heartbeat, just not yet assigned to this specific session).
+    """
     url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/vseriesNodes"
+    node_ids = []
     try:
         resp = requests.get(url, headers=AUTH_HEADERS, verify=False)
         if resp.status_code == 200:
             data = resp.json()
             nodes = data.get("vseriesNodes", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-            return [n.get("nodeId") for n in nodes if isinstance(n, dict) and n.get("nodeId")]
+            node_ids = [n.get("nodeId") for n in nodes if isinstance(n, dict) and n.get("nodeId")]
     except Exception as e:
         print(f"Error retrieving vSeries node IDs: {e}")
+
+    if node_ids:
+        return node_ids
+
+    conn_ids = (get_monitoring_session_details(session_id) or {}).get("connIds") or []
+    if not conn_ids:
+        return []
+
+    fabric_url = f"{FM_URL}/api/v1.3/cloud/anyCloud/fabricNodes/vseriesNodes"
+    try:
+        resp = requests.get(fabric_url, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            nodes = data.get("vseriesNodes", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            return [
+                n.get("nodeId") for n in nodes
+                if isinstance(n, dict) and n.get("connId") in conn_ids
+                and n.get("status") == "OK" and n.get("nodeId")
+            ]
+    except Exception as e:
+        print(f"Error retrieving fabric node IDs: {e}")
     return []
 
 
@@ -1151,42 +1296,125 @@ def set_endpoint_iface_mappings(session_id, vseries_node_id, iface_endpoint_pair
     return False
 
 
+def create_ogw_application(session_id, ingress_raw_id, egress_raw_id, alias="AMI-AMX",
+                            delete_map_id=None, delete_link_ids=None):
+    """
+    Creates the AMX-side "ogw" GigaSMART app - decodes the CEF metadata
+    arriving on the ingress raw endpoint and re-exports it as JSON to Cribl
+    via its cloudUpload exporter - and links Ingress-Raw -> app -> Egress-Raw.
+    This topology does NOT use a traffic map; the ogw app consumes raw bytes
+    directly.
+
+    Payload captured verbatim from the FM UI (see AMX-Setup.har). Two
+    findings from that capture that aren't obvious from the API shape alone:
+      - If a traffic map (and its raw<->map links) is still attached to the
+        session from an older build, FM rejects a plain "add app + links"
+        request with a 400. The map delete and the old links' deletes must
+        be folded into the SAME batch request that creates the app and the
+        new links, or the session is left inconsistent.
+      - A 202 Accepted response has an empty body (no operationResponses),
+        unlike the 200 the AMI app create on the main session returns - the
+        app's ID has to be recovered by re-fetching the session afterward.
+    """
+    url = f"{FM_URL}/api/v1.3/cloud/monitoringSessions/{session_id}/update"
+    app_ref_id = "ogw-app-1"
+
+    op_requests = [
+        {"entityType": "link", "operation": "delete", "link": {"id": link_id}}
+        for link_id in (delete_link_ids or [])
+    ]
+    op_requests.append({
+        "entityType": "application",
+        "operation": "create",
+        "referenceId": app_ref_id,
+        "application": {
+            "alias": alias,
+            "name": "ogw",
+            "exporter": {
+                "kafka": [],
+                "cloudUpload": [{
+                    "httpClientUploadTimeout": "10",
+                    "enable": True,
+                    "format": "json",
+                    "zip": True,
+                    "interval": "30",
+                    "writers": "4",
+                    "retries": "4",
+                    "maxEntries": "1000",
+                    "selfHealTimerWindow": "0",
+                    "ifaceIPAddress": "",
+                    "headers": [f"Authorization:{CRIBL_AUTH_TOKEN}"],
+                    "type": "ami",
+                    "endpoint": CRIBL_ENDPOINT,
+                    "maskEndpointApiKey": True,
+                    "secureKeys": [],
+                    "name": "Cribl-Test",
+                }],
+            },
+            "ingestor": [{"port": 514, "type": "ami", "name": "Cribl"}],
+            "attrEnrichment": [],
+        },
+    })
+    if delete_map_id:
+        op_requests.append({"entityType": "trafficMap", "operation": "delete", "map": {"id": delete_map_id}})
+    op_requests.append({
+        "entityType": "link",
+        "operation": "create",
+        "link": {
+            "alias": "",
+            "source": {"id": ingress_raw_id, "type": "raw", "aepId": None},
+            "dest": {"id": app_ref_id, "type": "application"},
+        },
+    })
+    op_requests.append({
+        "entityType": "link",
+        "operation": "create",
+        "link": {
+            "alias": "",
+            "source": {"id": app_ref_id, "type": "application", "aepId": None},
+            "dest": {"id": egress_raw_id, "type": "raw"},
+        },
+    })
+
+    try:
+        resp = requests.post(url, json={"requests": op_requests}, headers=AUTH_HEADERS, verify=False)
+        if resp.status_code not in (200, 202):
+            print(f"[ERROR] Failed to create ogw application. API returned {resp.status_code}: {resp.text}")
+            return None
+    except Exception as e:
+        print(f"Error creating ogw application: {e}")
+        return None
+
+    for _ in range(10):
+        time.sleep(2)
+        refreshed = get_monitoring_session_details(session_id)
+        app = next((a for a in (refreshed.get("applications") or []) if a.get("name") == "ogw"), None)
+        if app and app.get("id"):
+            print(f"Created ogw application '{alias}' (ID: {app['id']}), exporting JSON to Cribl.")
+            return app["id"]
+    print("[ERROR] ogw application creation accepted but did not appear on the session after polling.")
+    return None
+
+
 def configure_ami_monitoring_session_flow(
     session_id,
-    map_name="Azure-AMX-Map",
     ingress_alias="Ingress-Raw-Endpoint",
     egress_alias="Egress-Raw-Endpoint",
     ingress_iface="eth1",
     egress_iface="eth2",
-    aep_id=2,
+    app_alias="AMI-AMX",
 ):
     """
-    Builds the Ingress-Raw -> Map -> Egress-Raw flow on the AMX/AMI monitoring
-    session, binds the raw endpoints to the AMX node's physical data interfaces,
-    and deploys it.
-
-    NOTE: This wires up traffic selection and interface binding only. It does
-    NOT yet attach the AMX/AMI ("ogw") GigaSMART app or configure a destination
-    (e.g. Cribl) on the egress side - that piece still needs a captured request
-    from the FM UI (guessing JSON field names against an undocumented schema
-    risks a payload FM silently accepts but never actually exports data from).
+    Builds the Ingress-Raw -> ogw (GigaSMART) app -> Egress-Raw flow on the
+    AMX/AMI monitoring session - the ogw app decodes the CEF metadata and
+    re-exports it as JSON to Cribl - binds the raw endpoints to the AMX
+    node's physical data interfaces, and deploys it.
     """
     if not session_id:
         print("Skipping AMI monitoring session flow configuration (No Session ID).")
         return False
 
     details = get_monitoring_session_details(session_id)
-
-    existing_maps = details.get("trafficMaps") or []
-    if existing_maps:
-        map_id = existing_maps[0].get("id")
-        print(f"Traffic map already on AMI session (ID: {map_id}). Reusing it.")
-    else:
-        map_id = create_traffic_map(session_id, map_name, aep_id=aep_id)
-
-    if not map_id:
-        print("[ERROR] Could not complete AMI monitoring session flow (map creation failed).")
-        return False
 
     existing_raw = details.get("rawEndPoints") or []
     ingress_raw = next((r for r in existing_raw if r.get("alias") == ingress_alias), None)
@@ -1203,16 +1431,24 @@ def configure_ami_monitoring_session_flow(
         print("[ERROR] Could not complete AMI monitoring session flow (raw endpoint creation failed).")
         return False
 
-    existing_links = details.get("links") or []
-    if len(existing_links) >= 2:
-        print("Ingress/egress raw links already on session. Reusing them.")
+    existing_apps = details.get("applications") or []
+    ogw_app = next((a for a in existing_apps if a.get("name") == "ogw"), None)
+
+    if ogw_app:
+        app_id = ogw_app.get("id")
+        print(f"'{app_alias}' (ogw) app already on session (ID: {app_id}). Reusing it.")
     else:
-        if not create_session_link(session_id, ingress_id, "raw", map_id, "map", source_aep_id=None):
-            print("[ERROR] Could not complete AMI monitoring session flow (ingress link creation failed).")
-            return False
-        if not create_session_link(session_id, map_id, "map", egress_id, "raw", source_aep_id=aep_id):
-            print("[ERROR] Could not complete AMI monitoring session flow (egress link creation failed).")
-            return False
+        stale_maps = details.get("trafficMaps") or []
+        stale_links = details.get("links") or []
+        app_id = create_ogw_application(
+            session_id, ingress_id, egress_id, app_alias,
+            delete_map_id=stale_maps[0].get("id") if stale_maps else None,
+            delete_link_ids=[l.get("id") for l in stale_links if l.get("id")],
+        )
+
+    if not app_id:
+        print("[ERROR] Could not complete AMI monitoring session flow (ogw app creation failed).")
+        return False
 
     node_ids = get_vseries_node_ids(session_id)
     if not node_ids:
@@ -1225,12 +1461,12 @@ def configure_ami_monitoring_session_flow(
         print("[ERROR] Could not complete AMI monitoring session flow (interface binding failed).")
         return False
 
+    details = get_monitoring_session_details(session_id)
     if details.get("deployed"):
         print("AMI monitoring session already deployed.")
     elif not deploy_monitoring_session(session_id):
         return False
 
-    print("[TODO] AMX/AMI (\"ogw\") GigaSMART app + Cribl destination not yet wired up on the egress endpoint.")
     return True
 
 
@@ -1246,6 +1482,9 @@ def configure_monitoring_session_flow(
     amx_ingress_tunnel_alias="AMX-Ingress",
     amx_ingress_dport=2055,
     amx_ingress_sport=23385,
+    cribl_relay_tunnel_alias="Cribl-Relay",
+    cribl_relay_dport=1515,
+    cribl_relay_sport=23386,
     ami_scale_unit=2,
 ):
     """
@@ -1255,6 +1494,10 @@ def configure_monitoring_session_flow(
       Map -> AMI application -> AMX-Ingress (UDP, AMX node's ingress raw
                                               interface - see
                                               configure_ami_monitoring_session_flow())
+      Map -> AMI application -> Cribl-Relay (UDP, Tool VM's cef-cribl-relay.py,
+                                              see deploy_cribl_relay() - batches
+                                              raw CEF records to Cribl over HTTPS,
+                                              bypassing the AMX/ogw app entirely)
 
     Looks entities up by alias/relationship (not list position) since the
     session now holds multiple tunnels and links once all destinations exist.
@@ -1381,6 +1624,11 @@ def configure_monitoring_session_flow(
             session_changed = session_changed or changed
         else:
             print("Skipping AMI-to-AMX export (no AMX ingress private IP available).")
+        ok, changed = ensure_app_udp_export(
+            app_id, cribl_relay_tunnel_alias, tool_vm_private_ip, cribl_relay_dport, cribl_relay_sport
+        )
+        exports_ok = exports_ok and ok
+        session_changed = session_changed or changed
 
     if not exports_ok:
         # Force the caller (retry_until_true) to retry the whole function: a
@@ -1392,6 +1640,149 @@ def configure_monitoring_session_flow(
         print("Monitoring session already deployed.")
         return True
     return deploy_monitoring_session(session_id)
+
+
+_CRIBL_RELAY_SCRIPT_TEMPLATE = '''#!/usr/bin/env python3
+"""
+Receives CEF records over UDP (fed by the vSeries AMI app's export, the same
+delivery mechanism already used for the Elastic/Logstash destination) and
+batches them to Cribl over HTTPS every few seconds.
+
+Exists to bypass the AMX/"ogw" GigaSMART app, which turned out to have a
+broken internal DPDK-to-app handoff (real ingress traffic never reached the
+app's own ingestor process, confirmed via its Redis-backed counters staying
+at zero while FM's dataplane stats kept climbing). This relay is a small,
+fully visible replacement we control end-to-end instead of debugging
+Gigamon's opaque "ogw" app internals further.
+"""
+import socket
+import threading
+import time
+import urllib.request
+import urllib.error
+import logging
+
+LISTEN_PORT = __PORT__
+CRIBL_ENDPOINT = "__CRIBL_ENDPOINT__"
+CRIBL_AUTH_TOKEN = "__CRIBL_AUTH_TOKEN__"
+BATCH_INTERVAL_SECONDS = __BATCH_INTERVAL__
+
+logging.basicConfig(
+    filename="/var/log/cef-cribl-relay.log",
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+
+_buffer = []
+_lock = threading.Lock()
+
+
+def flush_loop():
+    while True:
+        time.sleep(BATCH_INTERVAL_SECONDS)
+        with _lock:
+            if not _buffer:
+                continue
+            batch = _buffer[:]
+            _buffer.clear()
+        payload = "\\n".join(batch).encode("utf-8")
+        req = urllib.request.Request(
+            CRIBL_ENDPOINT,
+            data=payload,
+            headers={"Authorization": CRIBL_AUTH_TOKEN, "Content-Type": "text/plain"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                logging.info("Sent %d records (%d bytes) - HTTP %s", len(batch), len(payload), resp.status)
+        except urllib.error.HTTPError as e:
+            logging.error("Cribl POST failed: HTTP %s %s", e.code, e.read()[:200])
+        except Exception as e:
+            logging.error("Cribl POST failed: %s", e)
+
+
+def main():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("0.0.0.0", LISTEN_PORT))
+    logging.info(
+        "Listening on UDP :%d, batching every %ds to %s", LISTEN_PORT, BATCH_INTERVAL_SECONDS, CRIBL_ENDPOINT
+    )
+    threading.Thread(target=flush_loop, daemon=True).start()
+    while True:
+        data, _ = sock.recvfrom(65535)
+        with _lock:
+            _buffer.append(data.decode("utf-8", errors="replace"))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+_CRIBL_RELAY_SERVICE = """[Unit]
+Description=CEF to Cribl relay
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/cef-cribl-relay.py
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def deploy_cribl_relay(port=1515, batch_interval=5):
+    """
+    Deploys the CEF->Cribl relay (see _CRIBL_RELAY_SCRIPT_TEMPLATE) to the
+    Tool VM as a systemd service, listening on the given UDP port and
+    batching records to Cribl every batch_interval seconds.
+    """
+    if not TOOL_VM_FQDN:
+        print("[WARNING] No Tool VM FQDN - skipping Cribl relay deployment.")
+        return False
+
+    print(f"\n--- Deploying CEF->Cribl relay to Tool VM ({TOOL_VM_FQDN}) ---")
+
+    script_content = (
+        _CRIBL_RELAY_SCRIPT_TEMPLATE
+        .replace("__PORT__", str(port))
+        .replace("__CRIBL_ENDPOINT__", CRIBL_ENDPOINT)
+        .replace("__CRIBL_AUTH_TOKEN__", CRIBL_AUTH_TOKEN)
+        .replace("__BATCH_INTERVAL__", str(batch_interval))
+    )
+
+    ssh_base = [
+        "ssh", "-i", KEY_FILE, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10",
+        f"{ADMIN_USER}@{TOOL_VM_FQDN}",
+    ]
+    try:
+        subprocess.run(
+            ssh_base + ["sudo bash -c 'cat > /opt/cef-cribl-relay.py'"],
+            input=script_content, text=True, capture_output=True, check=True, timeout=20,
+        )
+        subprocess.run(
+            ssh_base + ["sudo bash -c 'cat > /etc/systemd/system/cef-cribl-relay.service'"],
+            input=_CRIBL_RELAY_SERVICE, text=True, capture_output=True, check=True, timeout=20,
+        )
+        subprocess.run(
+            ssh_base + [
+                "sudo systemctl daemon-reload && "
+                "sudo systemctl enable --now cef-cribl-relay.service && "
+                "sudo systemctl restart cef-cribl-relay.service"
+            ],
+            capture_output=True, check=True, timeout=20,
+        )
+        print(f"  [SUCCESS] CEF->Cribl relay deployed and running on UDP :{port} (batching every {batch_interval}s).")
+        return True
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.strip() if isinstance(e.stderr, str) else (e.stderr or b"").decode(errors="replace")
+        print(f"  [ERROR] Failed to deploy Cribl relay: {stderr}")
+        return False
+    except Exception as e:
+        print(f"  [ERROR] Failed to deploy Cribl relay: {e}")
+        return False
 
 
 def push_node_config(token, fqdn, node_name, service_name, group_name, subgroup_name, step_label):
@@ -1661,6 +2052,11 @@ def main():
 
     # 6. Restart the production Ubuntu agents to force immediate registration
     restart_ubuntu_agents()
+
+    # 7. Deploy the CEF->Cribl relay to the Tool VM before the AMI app's
+    # export destinations are wired up below, so the listener is up before
+    # any records are sent to it.
+    deploy_cribl_relay()
 
     # Wait for each node to register, then build/deploy its session. A single
     # run of this script is now self-sufficient - no need to notice a 409 and
