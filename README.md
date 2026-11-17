@@ -23,20 +23,20 @@ Ensure you have Terraform >= 1.5.0, Azure CLI, and Python 3 installed.
 > **UCT-V Agent Package Requirement**  
 > Prior to running the deployment script, you **must** place the UCT-V agent Debian package (e.g., `gigamon-gigavue-uctv-6.xx.00-amd64.deb` matching your configured `gigamon_version` in `variables.tf`) in the `UCTV-files` directory. The deployment script performs a pre-flight check to verify this file exists and will halt with an error if it is missing.
 
-The Gigamon Cloud Suite version is controlled by the `gigamon_version` variable in `variables.tf` — it **defaults to `6.13`**; set it to `6.14` for the newer release. Both are published to the Azure Marketplace under the same offer. `ami-lab-deploy.py` also auto-detects the version from whichever single `.deb` package is present in `UCTV-files/` and updates this default to match, so it's normal for it to differ from whatever was last committed.
+The Gigamon Cloud Suite version is controlled by the `gigamon_version` variable in `variables.tf` — it **defaults to `6.14`**; set it to `6.13` to pin the previous release. Both are published to the Azure Marketplace under the same offer. `ami-lab-deploy.py` also auto-detects the version from whichever single `.deb` package is present in `UCTV-files/` and updates this default to match, so it's normal for it to differ from whatever was last committed.
 
 You **must** accept the Azure Marketplace terms for the Gigamon images before deploying, using the plan names for whichever `gigamon_version` you've configured (`v61400` for 6.14, `v61300` for 6.13):
 
 ```bash
-# Default (6.13)
-az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-suite-v2 --plan gfm-azure-v61300
-az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-suite-v2 --plan uctv-cntlr-v61300
-az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-suite-v2 --plan vseries-node-v61300
-
-# If setting gigamon_version = "6.14" instead
+# Default (6.14)
 az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-suite-v2 --plan gfm-azure-v61400
 az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-suite-v2 --plan uctv-cntlr-v61400
 az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-suite-v2 --plan vseries-node-v61400
+
+# If setting gigamon_version = "6.13" instead
+az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-suite-v2 --plan gfm-azure-v61300
+az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-suite-v2 --plan uctv-cntlr-v61300
+az vm image terms accept --publisher gigamon-inc --offer gigamon-gigavue-cloud-suite-v2 --plan vseries-node-v61300
 ```
 
 ## Architecture Overview
