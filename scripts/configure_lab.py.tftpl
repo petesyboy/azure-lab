@@ -34,6 +34,7 @@ FM_INTERNAL = "${fm_internal_name}"
 UCTV_INTERNAL = "${uctv_internal_name}"
 TOOL_VM_PRIVATE_IP = "${tool_vm_private_ip}"
 AMX_INGRESS_PRIVATE_IP = "${amx_ingress_private_ip}"
+ENABLE_CRIBL = ${enable_cribl ? "True" : "False"}  # Cribl egress path (relay + AMX ogw session) is opt-in
 CRIBL_ENDPOINT = "${cribl_endpoint}"
 CRIBL_AUTH_TOKEN = "${cribl_auth_token}"
 ADMIN_USER = "${admin_username}"
@@ -271,11 +272,22 @@ def change_fm_password_and_get_token(old_password, new_password, token_name="tf-
 
     if token_id is None:
         create_payload = {"tokenName": token_name, "expiryTime": "105", "groups": ["Super Admin Group"]}
-        resp = session.post(f"{FM_URL}/api/v1.3/tokens/create", data=json.dumps(create_payload), timeout=15)
-        if not resp.ok:
-            print(f"[!] Automated token creation failed (HTTP {resp.status_code}).")
+        # FM can answer 200 with an empty body for a short while right after
+        # the password change, so retry until we get a parseable tokenId.
+        for attempt in range(1, 7):
+            resp = session.post(f"{FM_URL}/api/v1.3/tokens/create", data=json.dumps(create_payload), timeout=15)
+            if resp.ok:
+                try:
+                    token_id = resp.json().get("tokenId")
+                except ValueError:
+                    token_id = None
+                if token_id:
+                    break
+            print(f"[!] Token creation attempt {attempt}/6 not ready (HTTP {resp.status_code}); retrying in 10s...")
+            time.sleep(10)
+        if not token_id:
+            print("[!] Automated token creation failed.")
             return None
-        token_id = resp.json().get("tokenId")
 
     if token_id is None:
         print("[!] Could not determine a token ID to retrieve.")
@@ -1340,7 +1352,7 @@ def create_ogw_application(session_id, ingress_raw_id, egress_raw_id, alias="AMI
                     "interval": "30",
                     "writers": "4",
                     "retries": "4",
-                    "maxEntries": "1000",
+                    "maxEntries": "5000",
                     "selfHealTimerWindow": "0",
                     "ifaceIPAddress": "",
                     "headers": [f"Authorization:{CRIBL_AUTH_TOKEN}"],
@@ -1616,19 +1628,20 @@ def configure_monitoring_session_flow(
         ok, changed = ensure_app_udp_export(app_id, elastic_tunnel_alias, tool_vm_private_ip, elastic_dport, elastic_sport)
         exports_ok = exports_ok and ok
         session_changed = session_changed or changed
-        if amx_ingress_private_ip:
+        if amx_ingress_private_ip and ENABLE_CRIBL:
             ok, changed = ensure_app_udp_export(
                 app_id, amx_ingress_tunnel_alias, amx_ingress_private_ip, amx_ingress_dport, amx_ingress_sport
             )
             exports_ok = exports_ok and ok
             session_changed = session_changed or changed
         else:
-            print("Skipping AMI-to-AMX export (no AMX ingress private IP available).")
-        ok, changed = ensure_app_udp_export(
-            app_id, cribl_relay_tunnel_alias, tool_vm_private_ip, cribl_relay_dport, cribl_relay_sport
-        )
-        exports_ok = exports_ok and ok
-        session_changed = session_changed or changed
+            print("Skipping AMI-to-AMX export (Cribl egress disabled or no AMX ingress private IP).")
+        if ENABLE_CRIBL:
+            ok, changed = ensure_app_udp_export(
+                app_id, cribl_relay_tunnel_alias, tool_vm_private_ip, cribl_relay_dport, cribl_relay_sport
+            )
+            exports_ok = exports_ok and ok
+            session_changed = session_changed or changed
 
     if not exports_ok:
         # Force the caller (retry_until_true) to retry the whole function: a
@@ -2056,7 +2069,10 @@ def main():
     # 7. Deploy the CEF->Cribl relay to the Tool VM before the AMI app's
     # export destinations are wired up below, so the listener is up before
     # any records are sent to it.
-    deploy_cribl_relay()
+    if ENABLE_CRIBL:
+        deploy_cribl_relay()
+    else:
+        print("Cribl egress disabled (enable_cribl = false) - skipping CEF->Cribl relay.")
 
     # Wait for each node to register, then build/deploy its session. A single
     # run of this script is now self-sufficient - no need to notice a 409 and
@@ -2068,7 +2084,7 @@ def main():
             "main session flow (map/tunnel/AMI app/deploy)",
         )
 
-    if ami_session_id:
+    if ami_session_id and ENABLE_CRIBL:
         wait_for_vseries_node(ami_session_id, "AMX node")
         retry_until_true(
             lambda: configure_ami_monitoring_session_flow(ami_session_id),

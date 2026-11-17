@@ -72,6 +72,12 @@ variable "amx_fm_subgroup_name" {
   default     = "Azure-3PO-AMX-Connection"
 }
 
+variable "enable_cribl" {
+  type        = bool
+  description = "Deploy the Cribl egress path: the CEF->Cribl relay on the Tool VM, the AMI Cribl-Relay and AMX-Ingress exports, and the AMX ogw session. Off by default; set true (with cribl_endpoint / cribl_auth_token) to bring it back."
+  default     = false
+}
+
 variable "cribl_endpoint" {
   type        = string
   description = "Cribl instance endpoint (e.g. HEC-style URL or host:port) that the AMX/AMI GigaSMART app exports metadata to. Leave empty until the destination is wired up."

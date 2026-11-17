@@ -107,6 +107,10 @@ az keyvault secret set --vault-name $KV_NAME --name $SECRET_NAME --value "<PASTE
 
 ## Monitoring Session (Automated)
 
+> [!NOTE]
+> **Cribl egress is currently disabled** (`enable_cribl = false`, the default). With it off, the lab skips the CEF→Cribl relay on the Tool VM, the AMI app's `Cribl-Relay` and `AMX-Ingress` exports, and the AMX `ogw` session. The AMI app still exports to Elastic on the Tool VM. The sections below that describe Cribl, the AMX session and the relay apply only when you set `enable_cribl = true` together with `cribl_endpoint` and `cribl_auth_token`.
+
+
 `scripts/configure_lab.py` fully automates both Monitoring Sessions — no manual steps in the FM UI are required. It's idempotent throughout: re-running it detects whatever already exists (domain, session, map, tunnel, app, link) and only creates/deploys what's missing, so it's always safe to run again.
 
 It's also self-healing across a fresh deploy: FM rejects a session deploy or link change until the corresponding vSeries/AMX node has finished registering, which lags a few minutes behind the SSH-based node registration. Rather than requiring a second manual invocation, the script waits for each node to appear registered and then retries the session build/deploy until it succeeds (bounded timeout, ~5 minutes).
